@@ -29,6 +29,8 @@ def run_intent_node(state: WorkflowState) -> WorkflowState:
         "生肖",
         "罗喉",
         "杀师",
+        "回显",
+        "echo",
     )
     state["need_tool"] = any(k in prompt or k in lowered for k in hints)
     state["node_events"].append(

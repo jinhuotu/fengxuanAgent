@@ -1,6 +1,9 @@
 """基于工作流运行器的聊天服务（M1）。"""
 
+import logging
 from typing import Any, cast
+
+logger = logging.getLogger("agent-backend")
 
 from fastapi import HTTPException
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -37,6 +40,12 @@ def chat_once(
 ) -> tuple[str, int, str | None, list[str]]:
     msg_count = db.query(ChatMessage).filter(ChatMessage.session_id == session.id).count()
     turn_count = (msg_count // 2) + 1
+    logger.info(
+        "chat_once: session_id=%s turn_count=%s user_id=%s",
+        session.id,
+        turn_count,
+        session.user_id,
+    )
     notice = "当前会话已超过 30 轮，为避免上下文过长建议开启新会话" if turn_count > 30 else None
 
     # 阶段一：不再预先对知识库做 RAG 拼接，让 LLM 通过工具按需检索。

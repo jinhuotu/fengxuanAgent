@@ -87,3 +87,9 @@ def _app_package_version() -> str:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "version": _app_package_version()}
+
+
+@app.get("/ping")
+def ping() -> dict:
+    """学习用探活接口：验证路由注册与本地修改是否生效。"""
+    return {"pong": True}

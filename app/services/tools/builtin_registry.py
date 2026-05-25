@@ -12,6 +12,7 @@ from app.services.tools.knowledge_tools import build_retrieve_context_tool
 from app.services.tools.runtime_tools import build_get_python_runtime_tool
 from app.services.tools.system_tools import build_get_system_status_tool
 from app.services.tools.time_tools import build_get_current_time_tool
+from app.services.tools.echo_tools import build_get_echo_tool
 from app.services.tools.bazi_tools import (
     build_compute_bazi_chart_tool,
     build_compute_luohou_tool,
@@ -54,6 +55,12 @@ BUILTIN_TOOL_SPECS: list[BuiltinToolSpec] = [
         tool_key="get_python_runtime",
         display_name="Python 运行时",
         description="返回后端进程使用的 Python 版本与实现名称，用于「用的 Python 几」「解释器版本」等问题。",
+        requires_kb=False,
+    ),
+    BuiltinToolSpec(
+        tool_key="get_echo",
+        display_name="回显测试",
+        description="将输入文本原样返回，用于学习内置工具注册与 Agent 工具调用链路。",
         requires_kb=False,
     ),
     BuiltinToolSpec(
@@ -106,6 +113,8 @@ def build_builtin_langchain_tools(
             out.append(build_get_current_time_tool())
         elif spec.tool_key == "get_python_runtime":
             out.append(build_get_python_runtime_tool())
+        elif spec.tool_key == "get_echo":
+            out.append(build_get_echo_tool())
         elif spec.tool_key == "compute_bazi_chart" and resolve_bazi_home() is not None:
             out.append(build_compute_bazi_chart_tool())
         elif spec.tool_key == "match_shengxiao" and resolve_bazi_home() is not None:

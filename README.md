@@ -6,6 +6,10 @@
 
 从架构、请求链路、各模块职责到「加功能时改哪些文件」，见 **[docs/BACKEND_GUIDE.md](docs/BACKEND_GUIDE.md)**。
 
+## 精读学习路线（初学者）
+
+按阶段阅读与动手练习，见 **[docs/LEARNING_PREREQUISITES.md](docs/LEARNING_PREREQUISITES.md)** 起，依次链接至各 `docs/LEARNING_PHASE_*.md` 与 **[docs/LEARNING_ENV_SETUP.md](docs/LEARNING_ENV_SETUP.md)**。
+
 ## 技术栈
 
 - Python 3.10+

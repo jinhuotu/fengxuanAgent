@@ -10,7 +10,7 @@ from app.workflows.nodes.answer_node import run_answer_node
 from app.workflows.nodes.execute_tools_node import run_execute_tools_node
 from app.workflows.nodes.intent_node import run_intent_node
 from app.workflows.nodes.plan_node import run_plan_node
-from app.workflows.state import WorkflowloState
+from app.workflows.state import WorkflowState
 
 logger = logging.getLogger("agent-backend")
 
