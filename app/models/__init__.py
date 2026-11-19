@@ -1,0 +1,7 @@
+"""模型包。
+
+这一句 import 是关键：只有被 import 过的模型类才会登记进 Base.metadata，
+alembic 的 autogenerate 才看得见它。以后每新增一个模型文件，这里补一行。
+"""
+
+from app.models.user import User  # noqa: F401

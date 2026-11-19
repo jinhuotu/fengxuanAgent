@@ -1,0 +1,8 @@
+﻿uv : Resolved 41 packages in 3ms
+所在位置 行:5 字符: 1
++ uv sync *> uv_sync_log.txt
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Resolved 41 packages in 3ms:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Checked 39 packages in 52ms

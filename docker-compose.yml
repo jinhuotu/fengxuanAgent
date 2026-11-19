@@ -1,0 +1,61 @@
+# 本项目专用的本地基础设施：MySQL 8.4 + Redis 7
+#
+# 用法：
+#   docker compose up -d mysql      只起数据库（阶段一、二需要）
+#   docker compose up -d redis      到阶段三需要缓存时再单独起
+#   docker compose ps               看状态，等 STATUS 出现 (healthy) 才算好
+#
+# 端口为什么是 3307 / 6380：
+#   你本机的 3306（本地装的 MySQL）和 6379（本地装的 Redis）已经被占用，
+#   另外几个项目还各占一套（13306 / 26379 / 16379）。本项目单独用一对端口，互不干扰。
+#
+# 数据放在命名卷里：docker compose down 不会丢数据，只有 docker compose down -v 才会删。
+
+name: fengxuan
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: fengxuan-mysql
+    restart: unless-stopped
+    ports:
+      # 只绑 127.0.0.1：数据库不对局域网开放，别的机器连不进来
+      - "127.0.0.1:3307:3306"
+    environment:
+      # 密码从项目根目录的 .env 读取；没设就直接报错，不给你一个空密码的库
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请先在 .env 里设置 DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-fengxuan_agent}
+      TZ: Asia/Shanghai
+    command:
+      # 字符集和时区在服务端统一设好，避免中文乱码和 created_at 差 8 小时
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - fengxuan_mysql_data:/var/lib/mysql
+    healthcheck:
+      # 用 mysqladmin ping 判断"能连上且能应答"，比只看进程在不在可靠
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: fengxuan-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6380:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - fengxuan_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  fengxuan_mysql_data:
+  fengxuan_redis_data:

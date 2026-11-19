@@ -1,0 +1,20 @@
+# 环境目录：本地产物，可以从 uv.lock 随时重建，绝不提交
+.venv/
+
+# 真实配置与密钥：服务器上单独放，绝不提交
+.env
+
+# Python 运行产物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 编辑器
+.vscode/
+.idea/
+
+# 系统
+Thumbs.db
+.DS_Store

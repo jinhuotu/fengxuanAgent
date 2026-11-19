@@ -1,0 +1,26 @@
+# 阶段一依赖清单
+# 装法：pip install -r requirements.txt
+# 装完后跑 pip list，把实际版本贴回来，再决定是否逐条锁死版本
+
+# ---- Web 框架 ----
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30
+
+# ---- 数据库（MySQL 8 + SQLAlchemy 2.0 同步写法）----
+sqlalchemy>=2.0.30,<3.0
+pymysql>=1.1
+cryptography>=42          # MySQL 8 默认认证方式需要它，漏了会报密码认证失败
+alembic>=1.13
+
+# ---- 配置 ----
+pydantic-settings>=2.4    # 从 .env 读配置，替代手写 os.environ
+python-dotenv>=1.0
+
+# ---- 认证（阶段一新增）----
+PyJWT>=2.8                # 签发和校验 JWT，比 python-jose 依赖少
+bcrypt>=4.2               # 密码哈希。直接用 bcrypt 两个函数，不经 passlib
+                          # （passlib 1.7.4 与 bcrypt 4.1+ 有已知兼容告警）
+
+# ---- 测试 ----
+pytest>=8.2
+httpx>=0.27               # 测试里直接调接口用
