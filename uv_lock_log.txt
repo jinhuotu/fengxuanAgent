@@ -1,7 +1,0 @@
-﻿uv : Resolved 41 packages in 1.55s
-所在位置 行:7 字符: 1
-+ uv lock --refresh *> uv_lock_log.txt
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (Resolved 41 packages in 1.55s:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
