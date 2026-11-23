@@ -4,4 +4,5 @@
 alembic 的 autogenerate 才看得见它。以后每新增一个模型文件，这里补一行。
 """
 
+from app.models.rbac import Permission, Role, RolePermission, UserRole  # noqa: F401
 from app.models.user import User  # noqa: F401

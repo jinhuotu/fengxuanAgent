@@ -88,7 +88,7 @@ docker compose down -v
 改了 `models/` 里的表结构，必须走这三步，不要手写 SQL 直接改表。
 
 ```powershell
-# 1. 生成迁移文件（对比模型和数据库现状，把差异写成脚本）
+# 1. 生成迁移文件（新增表、字段等结构变更）
 uv run alembic revision --autogenerate -m "给这次改动起个名字"
 
 # 2. 打开 alembic/versions/ 下新生成的文件看一眼，确认它要做的事对
@@ -105,6 +105,21 @@ uv run alembic current
 ```
 
 连接串不写进 `alembic.ini`，由 `alembic/env.py` 从 `core/config.py` 取，密码只有 `.env` 一处来源。
+
+新建表时，核对迁移里的表注释和每一列的中文 `comment`。仅补既有表注释时，参考 [users 注释迁移](../alembic/versions/b5f0c2d9e8a7_add_chinese_comments_to_users.py) 显式写入迁移。使用 `MODIFY COLUMN` 时，按目标库的原定义保留类型、默认值、可空性、自增和字符集等属性。
+
+迁移后，在目标库用 `SHOW FULL COLUMNS FROM 表名` 核对列注释，用 `SHOW CREATE TABLE 表名` 核对表注释和其他结构属性。
+
+## 二之四、创建第一个管理员
+
+```powershell
+uv run python scripts/create_admin.py --username admin
+```
+
+密码是交互式输入的，**必须在真实终端里跑**，不要用管道喂密码（`getpass` 在非交互终端不会读标准输入，进程会卡住）。
+用户名已存在时脚本只打一行日志、不改任何数据，可以放心重跑。
+
+脚本会给新账号设置 `is_admin=True`。建库顺序和接口验收见 [部署顺序](scripts.md#三部署到新服务器的顺序)。
 
 ## 三、四个文件的分工（记这一句就够）
 

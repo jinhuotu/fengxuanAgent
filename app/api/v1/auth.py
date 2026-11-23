@@ -1,0 +1,39 @@
+"""认证接口。
+
+这一层只做三件事：收参数、调 service、包统一响应。
+判断账号对不对、密码错没错，一律在 services 里，这里不写一个 if。
+"""
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user
+from app.db.session import get_db
+from app.schemas.auth import LoginRequest, UserInfo
+from app.services import auth as auth_service
+from app.utils.response import success
+
+# 前缀 /auth 与前端 src/api/auth.ts 的 '/auth/login' 对上；
+# 前端请求 /api/auth/login，Vite 代理把 /api 去掉后正好落到这里
+router = APIRouter(prefix="/auth", tags=["认证"])
+
+
+# 做什么：登录接口入口，把请求体交给 service，再把结果包成统一响应
+# 入参：payload 已通过 Pydantic 校验的请求体；db_session 请求级会话，由 get_db 注入
+# 返回：{code, message, data}，data 为 access_token / token_type / expires_in
+# 失败：service 抛出的业务异常交给全局处理器转 401 或 403，本函数不捕获
+@router.post("/login", summary="登录")
+def login_endpoint(payload: LoginRequest, db_session: Session = Depends(get_db)) -> dict:
+    login_result = auth_service.login(
+        db_session, username=payload.username, password=payload.password
+    )
+    return success(login_result.model_dump())
+
+
+# 做什么：返回当前登录用户的信息，证明这枚 token 确实代表某个人
+# 入参：current_user 由 get_current_user 依赖解析出来，没带 token 到不了这里
+# 返回：统一响应，data 为 id / username / display_name / status / created_at
+# 失败：token 缺失、过期、伪造，由依赖抛异常转 401；本函数不做任何判断
+@router.get("/me", summary="当前用户")
+def me_endpoint(current_user: UserInfo = Depends(get_current_user)) -> dict:
+    return success(current_user.model_dump())

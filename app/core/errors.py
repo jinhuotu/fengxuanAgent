@@ -18,6 +18,9 @@ CODE_INVALID_PARAMS = 1000
 CODE_INVALID_CREDENTIALS = 1001
 CODE_TOKEN_INVALID = 1002
 CODE_ACCOUNT_DISABLED = 1003
+CODE_ACCOUNT_LOCKED = 1004
+CODE_USERNAME_TAKEN = 1005
+CODE_PERMISSION_DENIED = 2001
 CODE_INTERNAL_ERROR = 5000
 
 DEFAULT_HTTP_STATUS = 400
@@ -67,6 +70,38 @@ class AccountDisabledError(BusinessError):
     code = CODE_ACCOUNT_DISABLED
     http_status = 403
     message = "账号已被停用，请联系管理员"
+
+
+# 做什么：连续登录失败次数过多，账号被临时锁定
+# 入参：可选自定义提示
+# 返回：无（抛出后转 429，表示"短期内别再来试"，与 401 的"凭证不对"区分开）
+# 为什么用 429：前端能一眼分清"密码错"和"被锁"，不用弹两次同样的提示
+class AccountLockedError(BusinessError):
+    code = CODE_ACCOUNT_LOCKED
+    http_status = 429
+    message = "登录失败次数过多，请 10 分钟后再试"
+
+
+# 做什么：新建用户时用户名已被占用
+# 入参：可选自定义提示
+# 返回：无（抛出后转 409）
+# 为什么用 409：表示"请求本身没问题，但跟服务器现状冲突"，比 400 更能说清原因
+class UsernameTakenError(BusinessError):
+    code = CODE_USERNAME_TAKEN
+    http_status = 409
+    message = "用户名已存在，换一个"
+
+
+# 做什么：身份合法，但没有执行这个操作的权限
+# 入参：可选自定义提示
+# 返回：无（抛出后转 403）
+# 为什么和 AccountDisabledError 分开：那个是"账号被停用"，这个是"账号正常但不该干这事"，
+# 前端处理方式不同，日志排查时也能一眼分清是账号问题还是越权
+# 错误码进 2000 段：按文件顶部的约定，2000-2999 留给权限类
+class PermissionDeniedError(BusinessError):
+    code = CODE_PERMISSION_DENIED
+    http_status = 403
+    message = "没有权限执行此操作"
 
 
 # 做什么：把上面这些异常接住，转成统一响应结构

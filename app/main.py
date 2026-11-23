@@ -13,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app.api.v1.auth import router as auth_router
+from app.api.v1.users import router as users_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
@@ -50,6 +52,11 @@ app.add_middleware(
 
 # 三个全局异常处理器在这里挂上，接口里就不用各自 try/except
 register_exception_handlers(app)
+
+# 认证路由挂在这里：以后每加一组接口，这里只多一行 include_router
+app.include_router(auth_router)
+# 用户管理路由：目前只有"管理员建用户"一个接口
+app.include_router(users_router)
 
 
 # 做什么：确认服务活着、数据库能连
