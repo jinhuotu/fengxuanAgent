@@ -12,7 +12,7 @@ from app.llm.client import ModelChunk
 from app.main import app
 from app.services import chat_stream
 from app.services.chat_history import create_session
-from tests.chat_support import chat_sessions, history_items
+from tests.chat_support import file_chat_sessions, history_items
 
 
 # 做什么：产生一个片段后等待，方便客户端在生成过程中关闭连接
@@ -98,10 +98,10 @@ async def live_disconnect_check(sessions):
 
 
 # 做什么：证明真实 HTTP 断开会保存部分回答并标记中断
-# 入参：内存库和模拟替换工具
+# 入参：文件库会话工厂和模拟替换工具（服务线程与测试线程各用独立连接）
 # 返回：无；服务生命周期、鉴权或断线处理异常都会使测试失败
-def test_real_http_disconnect_preserves_partial_answer(chat_sessions, monkeypatch):
-    monkeypatch.setattr(database_session, "SessionLocal", chat_sessions)
+def test_real_http_disconnect_preserves_partial_answer(file_chat_sessions, monkeypatch):
+    monkeypatch.setattr(database_session, "SessionLocal", file_chat_sessions)
     monkeypatch.setattr(chat_stream, "stream_model", slow_model)
-    assert asyncio.run(live_disconnect_check(chat_sessions)) == "已收到的部分回答"
+    assert asyncio.run(live_disconnect_check(file_chat_sessions)) == "已收到的部分回答"
 
