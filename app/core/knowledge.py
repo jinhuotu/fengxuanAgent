@@ -1,8 +1,14 @@
-"""知识库文档的固定状态与字段长度。"""
+"""知识库文档状态、字段长度和切分参数。"""
 from enum import IntEnum
 
 DOCUMENT_TITLE_LENGTH = 100
 DOCUMENT_CONTENT_LENGTH = 50000
+CHUNK_HEADING_PATH_LENGTH = 120
+CHUNK_MIN_CHARS = 400
+CHUNK_TARGET_MAX = 600
+CHUNK_HARD_MAX = 800
+CHUNK_OVERLAP_MIN = 50
+CHUNK_OVERLAP_MAX = 80
 
 
 # 新手注意：状态枚举像带编号的标签，数据库和接口都用编号，代码里用名称。

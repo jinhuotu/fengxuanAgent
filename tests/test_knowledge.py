@@ -13,7 +13,7 @@ from app.core.security import create_access_token, hash_password
 from app.db import session as database_session
 from app.db.base import Base
 from app.main import app
-from app.models.knowledge import KnowledgeBase, KnowledgeDocument
+from app.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
 from app.models.user import User
 
 KNOWLEDGE_BASE_URL = "/knowledge-bases"
@@ -186,14 +186,14 @@ def test_upload_document_preserves_content(knowledge_client, owner_headers, know
     assert set(document_item) == {"id", "title", "char_count", "status", "created_at"}
     assert document_item["title"] == title
     assert document_item["char_count"] == len(content)
-    assert type(document_item["status"]) is int and document_item["status"] == DocumentStatus.PENDING
+    assert type(document_item["status"]) is int and document_item["status"] == DocumentStatus.READY
     assert datetime.fromisoformat(document_item["created_at"])
     with knowledge_sessions() as query_session:
         document = query_session.get(KnowledgeDocument, document_item["id"])
         assert document is not None
         assert (document.knowledge_base_id, document.owner_id) == (OWNER_BASE_ID, OWNER_ID)
         assert document.raw_content == content
-        assert (document.char_count, document.status) == (len(content), DocumentStatus.PENDING)
+        assert (document.char_count, document.status) == (len(content), DocumentStatus.READY)
 
 
 # 做什么：确认两条接口对他人库、已删除库和不存在的库统一隐藏
@@ -286,7 +286,7 @@ def test_document_endpoints_require_login(knowledge_client, document_bases, meth
 def test_base_list_counts_uploaded_documents(
     knowledge_client, owner_headers, knowledge_sessions, document_bases
 ) -> None:
-    first_upload = knowledge_client.post(DOCUMENT_URL, json={"title": "第一篇", "content": " "}, headers=owner_headers)
+    first_upload = knowledge_client.post(DOCUMENT_URL, json={"title": "第一篇", "content": " 正文 "}, headers=owner_headers)
     second_upload = knowledge_client.post(DOCUMENT_URL, json={"title": "第二篇", "content": "正文"}, headers=owner_headers)
     assert first_upload.status_code == second_upload.status_code == 200
     initial_page = knowledge_client.get(KNOWLEDGE_BASE_URL, headers=owner_headers)
@@ -308,3 +308,78 @@ def test_base_list_counts_uploaded_documents(
     assert updated_page.status_code == 200
     updated_items = updated_page.json()["data"]["items"]
     assert {item["id"]: item["document_count"] for item in updated_items} == expected_counts
+
+
+# 做什么：通过上传接口为本人库建立一篇可切成多块的文档
+# 入参：隔离客户端、本人请求头和预建知识库
+# 返回：上传的文档字段；未成功上传时断言失败
+@pytest.fixture
+def chunked_upload(knowledge_client, owner_headers, document_bases) -> dict:
+    content = ("字" * 49 + "。") * 40
+    payload = {"title": "切分验收", "content": content}
+    response = knowledge_client.post(DOCUMENT_URL, json=payload, headers=owner_headers)
+    assert response.status_code == 200 and response.json()["code"] == 0
+    return response.json()["data"]
+
+
+# 做什么：确认上传与文档列表都返回就绪状态
+# 入参：隔离客户端、本人请求头及已上传的文档
+# 返回：无；上传或列表状态不是数字 5 时断言失败
+def test_chunked_upload_returns_ready(knowledge_client, owner_headers, chunked_upload) -> None:
+    assert chunked_upload["status"] == DocumentStatus.READY == 5
+    response = knowledge_client.get(DOCUMENT_URL, headers=owner_headers)
+    assert response.status_code == 200
+    assert response.json()["data"]["items"] == [chunked_upload]
+
+
+# 做什么：确认数据库保存切片及关联编号，而且正文能按偏移复原
+# 入参：测试会话工厂和已上传的文档
+# 返回：无；无切片或正文、关联编号不一致时断言失败
+def test_chunked_upload_persists_owned_chunks(knowledge_sessions, chunked_upload) -> None:
+    with knowledge_sessions() as query_session:
+        document = query_session.get(KnowledgeDocument, chunked_upload["id"])
+        assert document is not None
+        chunk_query = select(KnowledgeChunk).where(KnowledgeChunk.document_id == document.id)
+        chunks = query_session.scalars(chunk_query).all()
+        assert len(chunks) > 1
+        for chunk in chunks:
+            assert (chunk.knowledge_base_id, chunk.owner_id) == (OWNER_BASE_ID, OWNER_ID)
+            assert document.raw_content[chunk.char_start:chunk.char_end] == chunk.content
+
+
+# 做什么：确认按文档编号查到的切片从零连续编号
+# 入参：测试会话工厂和已上传的文档
+# 返回：无；文档切片缺失或序号断开时断言失败
+def test_persisted_chunk_indexes_are_contiguous(knowledge_sessions, chunked_upload) -> None:
+    index_query = select(KnowledgeChunk.chunk_index).where(
+        KnowledgeChunk.document_id == chunked_upload["id"]
+    ).order_by(KnowledgeChunk.chunk_index)
+    with knowledge_sessions() as query_session:
+        indexes = query_session.scalars(index_query).all()
+    assert len(indexes) > 1 and indexes == list(range(len(indexes)))
+
+
+# 做什么：确认向他人的知识库上传会被拒绝且无切片写入
+# 入参：隔离客户端、本人请求头、测试会话工厂和预建知识库
+# 返回：无；未返回 404/4001 或存在切片时断言失败
+def test_upload_to_other_base_does_not_create_chunks(
+    knowledge_client, owner_headers, knowledge_sessions, document_bases
+) -> None:
+    other_url = f"{KNOWLEDGE_BASE_URL}/{OTHER_BASE_ID}/documents"
+    response = knowledge_client.post(other_url, json={"title": "资料", "content": "原文"}, headers=owner_headers)
+    assert response.status_code == 404 and response.json()["code"] == 4001
+    with knowledge_sessions() as query_session:
+        assert query_session.scalar(select(KnowledgeChunk.id)) is None
+
+
+# 做什么：确认无法切分的全空白文档返回系统错误并整体回滚
+# 入参：本人请求头、测试会话工厂和预建知识库
+# 返回：无；未返回 500/5000 或写入留下记录时断言失败
+def test_blank_upload_rolls_back_document_and_chunks(owner_headers, knowledge_sessions, document_bases) -> None:
+    with TestClient(app, raise_server_exceptions=False) as client:
+        payload = {"title": "空白文档", "content": " \n\t "}
+        response = client.post(DOCUMENT_URL, json=payload, headers=owner_headers)
+    assert response.status_code == 500 and response.json()["code"] == 5000
+    with knowledge_sessions() as query_session:
+        assert query_session.scalar(select(KnowledgeDocument.id)) is None
+        assert query_session.scalar(select(KnowledgeChunk.id)) is None

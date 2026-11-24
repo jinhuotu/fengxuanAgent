@@ -1,11 +1,11 @@
-"""个人知识库与文档表结构。"""
+"""个人知识库、文档与切片表结构。"""
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.dialects.mysql import MEDIUMTEXT, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.knowledge import DOCUMENT_TITLE_LENGTH
+from app.core.knowledge import CHUNK_HEADING_PATH_LENGTH, DOCUMENT_TITLE_LENGTH
 from app.db.base import Base
 
 # 新手注意：类型变体像两套编号模板，MySQL 用 BIGINT，SQLite 测试用 INTEGER 自增。
@@ -66,6 +66,37 @@ class KnowledgeDocument(Base):
         TINYINT().with_variant(Integer, "sqlite"),
         comment="处理状态：一待切分，二解析中，三切分中，四建索引中，五可检索，六处理失败",
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), comment="创建时间，东八区"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间，东八区"
+    )
+    is_deleted: Mapped[int] = mapped_column(
+        DELETION_TYPE, default=IS_NOT_DELETED, server_default=str(IS_NOT_DELETED),
+        comment="软删除标记，零表示正常，一表示删除",
+    )
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        Index("idx_knowledge_chunks_doc", "document_id", "is_deleted", "chunk_index"),
+        Index("idx_knowledge_chunks_base", "knowledge_base_id", "is_deleted", "id"),
+        {"comment": "知识库切片：保存文档片段与在原文中的字符位置"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        IDENTIFIER_TYPE, primary_key=True, autoincrement=True, comment="切片编号，自增"
+    )
+    knowledge_base_id: Mapped[int] = mapped_column(BigInteger, comment="所属知识库编号")
+    document_id: Mapped[int] = mapped_column(BigInteger, comment="所属文档编号")
+    owner_id: Mapped[int] = mapped_column(BigInteger, comment="归属用户编号，用于过滤")
+    chunk_index: Mapped[int] = mapped_column(Integer, comment="文档内切片序号，从零开始")
+    heading_path: Mapped[str] = mapped_column(String(CHUNK_HEADING_PATH_LENGTH), comment="标题与段落路径")
+    content: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), comment="切片正文")
+    char_start: Mapped[int] = mapped_column(Integer, comment="原文起始字符偏移，包含该位置")
+    char_end: Mapped[int] = mapped_column(Integer, comment="原文结束字符偏移，不包含该位置")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), comment="创建时间，东八区"
     )

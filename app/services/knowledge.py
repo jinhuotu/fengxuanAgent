@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import KnowledgeBaseNotFoundError
 from app.core.knowledge import DocumentStatus
-from app.models.knowledge import IS_NOT_DELETED, KnowledgeBase, KnowledgeDocument
+from app.models.knowledge import IS_NOT_DELETED, KnowledgeBase, KnowledgeChunk, KnowledgeDocument
+from app.rag.chunking import split_document
 from app.schemas.knowledge import (
     KnowledgeBaseCreate,
     KnowledgeBaseItem,
@@ -93,7 +94,7 @@ def _require_owned_knowledge_base(db_session: Session, owner_id: int, knowledge_
         raise KnowledgeBaseNotFoundError()
 
 
-# 做什么：校验归属后保存原文，并标记文档待切分
+# 做什么：校验归属，在同一事务保存原文与切片并标记文档就绪
 # 入参：独立写入会话、当前用户编号、知识库编号和已校验表单
 # 返回：文档的公开字段；校验或写入失败时回滚并抛出异常
 def create_knowledge_document(
@@ -107,12 +108,41 @@ def create_knowledge_document(
             title=payload.title,
             raw_content=payload.content,
             char_count=len(payload.content),
-            status=DocumentStatus.PENDING,
+            status=DocumentStatus.CHUNKING,
         )
         db_session.add(document)
         db_session.flush()
+        _save_document_chunks(db_session, document)
+        document.status = DocumentStatus.READY
         document_item = KnowledgeDocumentItem.model_validate(document)
     return document_item
+
+
+# 做什么：切分正文并批量写入当前文档的切片
+# 入参：写入事务的会话，已取得编号的文档
+# 返回：无；无切片时写入失败状态并抛出系统异常，外层事务回滚
+def _save_document_chunks(db_session: Session, document: KnowledgeDocument) -> None:
+    chunk_drafts = split_document(document.title, document.raw_content)
+    # 无可用切片的文档不能进入就绪状态，失败状态随事务一同回滚。
+    if not chunk_drafts:
+        document.status = DocumentStatus.FAILED
+        db_session.flush()
+        raise RuntimeError("文档切分未生成切片")
+    chunks: list[KnowledgeChunk] = []
+    for chunk_index, draft in enumerate(chunk_drafts):
+        chunk = KnowledgeChunk(
+            knowledge_base_id=document.knowledge_base_id,
+            document_id=document.id,
+            owner_id=document.owner_id,
+            chunk_index=chunk_index,
+            heading_path=draft.heading_path,
+            content=draft.content,
+            char_start=draft.char_start,
+            char_end=draft.char_end,
+        )
+        chunks.append(chunk)
+    db_session.add_all(chunks)
+    db_session.flush()
 
 
 # 做什么：校验归属后按编号倒序分页读取该库文档的公开字段
