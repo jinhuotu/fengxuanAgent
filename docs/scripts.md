@@ -39,14 +39,23 @@ uv run python scripts/create_admin.py --username admin
 - 参数：无
 - 前置条件：MySQL 容器已启动、`alembic upgrade head` 已执行（四张 RBAC 表必须先存在）。
 - 可否重复执行：可以。每个权限点、每个角色、每条授权关系都是先按 code 查再插，已存在的跳过；不会插重复，也不会重置绑定时间。
-- 内容：权限点 `users:create` / `users:disable` / `users:list`；角色 `admin`（挂全部三项）与 `user`（不挂任何权限点）。
+- 内容：权限点 `users:create`、`users:disable`、`users:list` 和 `users:assign_role`。角色 `admin` 挂全部四项，`user` 的权限清单为空。
 - 执行方式（在项目根目录）：
 
 ```powershell
 uv run python scripts/seed_rbac.py
 ```
 
-- 脚本结束会记录每个角色当前拥有的权限。当前 `POST /users` 通过 `is_admin` 鉴权，角色权限查询尚未接入接口。
+- 已有环境重跑脚本后，已绑定 `admin` 角色的账号会获得 `users:assign_role`。首次部署需在初始化时完成首管的 `admin` 角色绑定。
+
+### scripts/acceptance_stage2.py
+
+- 用途：通过真实 HTTP 验证阶段二的授权、角色变更、停用和启用，输出可粘贴到验收报告的结果。
+- 参数：`--username`（可选，默认 `admin`），指定管理员账号 A。
+- 前置条件：`127.0.0.1:8081` 已运行当前后端并连接项目 MySQL。健康检查、四条指定路由及 A 的 `users:assign_role` 必须通过。A 需持有 `admin` 角色和完整四项权限。
+- 可否重复执行：可以。`accept_b` 和 `accept_c` 已存在时复用，已停用时通过 API 启用。成功跑完会撤销本轮验证用角色并停用两人。中途失败时按表格核对最后完成的步骤和最终状态。
+- 执行方式：在仓库根目录运行 `uv run --no-sync python scripts/acceptance_stage2.py --username admin`。
+- 注意：在真实终端用 `getpass` 输入 A 和两个验收账号的密码。新建验收账号时输入新密码并自行保存，复用时输入原密码。使用专用的 `accept_b`、`accept_c`，脚本会实际改变其角色和状态。脚本通过 API 操作，缺路由或权限时停止。 [报告模板](验收/阶段二.md)
 
 ## 三、部署到新服务器的顺序
 

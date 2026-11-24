@@ -32,11 +32,15 @@ PERMISSION_SEEDS = [
     ("users:create", "新建用户"),
     ("users:disable", "停用用户"),
     ("users:list", "查看用户列表"),
+    ("users:assign_role", "授予或撤销用户角色"),
 ]
 
 # 角色清单：第四个元素是该角色包含的权限码，空列表表示这个角色没有任何权限点
 ROLE_SEEDS = [
-    ("admin", "管理员", "拥有全部管理权限", ["users:create", "users:disable", "users:list"]),
+    (
+        "admin", "管理员", "拥有全部管理权限",
+        ["users:create", "users:disable", "users:list", "users:assign_role"],
+    ),
     ("user", "普通用户", "登录后只能查看自己的信息", []),
 ]
 

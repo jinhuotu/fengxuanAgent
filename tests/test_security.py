@@ -97,8 +97,9 @@ def test_versioned_hash_requires_a_pepper(monkeypatch: pytest.MonkeyPatch) -> No
 # 入参：无
 # 返回：无
 def test_token_round_trip() -> None:
-    token = create_access_token(user_id=42)
-    assert decode_access_token(token) == 42
+    token = create_access_token(user_id=42, token_version=3)
+    claims = decode_access_token(token)
+    assert (claims.user_id, claims.token_version) == (42, 3)
 
 
 # 做什么：确认被篡改的 token 验不过
@@ -106,7 +107,10 @@ def test_token_round_trip() -> None:
 # 返回：无；应抛 TokenInvalidError（对外是 401 + code 1002）
 def test_tampered_token_is_rejected() -> None:
     token = create_access_token(user_id=7)
-    tampered = token[:-1] + ("a" if token[-1] != "a" else "b")
+    header, payload, signature = token.split(".")
+    # 改签名首字符，确保改动落在真实签名字节上。
+    replacement = "A" if signature[0] != "A" else "B"
+    tampered = ".".join((header, payload, replacement + signature[1:]))
     with pytest.raises(TokenInvalidError):
         decode_access_token(tampered)
 

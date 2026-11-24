@@ -5,7 +5,7 @@ api 层只收参数和包响应，不再重复判断，规则只有这一份。
 """
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
 from app.core.config import get_settings
 from app.core.errors import (
@@ -13,7 +13,7 @@ from app.core.errors import (
     InvalidCredentialsError,
     TokenInvalidError,
 )
-from app.core.security import create_access_token, decode_access_token, verify_password
+from app.core.security import AccessTokenClaims, create_access_token, decode_access_token, verify_password
 from app.models.user import USER_STATUS_ACTIVE, User
 from app.schemas.auth import LoginResponse, UserInfo
 from app.services import login_guard
@@ -31,7 +31,9 @@ SECONDS_PER_MINUTE = 60
 def authenticate_user(db_session: Session, username: str, password: str) -> User:
     # 新手注意：scalars 把结果行拆成单个对象，one_or_none 是"零行给 None，多行直接报错"
     # 注意 Session 本身没有 one_or_none，这个方法在 scalars 返回的结果对象上，顺序不能反
-    user = db_session.scalars(select(User).where(User.username == username)).one_or_none()
+    # 密码哈希和签发版本必须来自同一条查询，防止并发改密时交叉读到新旧值。
+    user_query = select(User).options(undefer(User.token_version)).where(User.username == username)
+    user = db_session.scalars(user_query).one_or_none()
 
     # 账号不存在和密码不对共用同一句提示，防止有人拿错误信息反推哪些账号存在
     if user is None:
@@ -63,26 +65,28 @@ def login(db_session: Session, username: str, password: str) -> LoginResponse:
         raise
 
     login_guard.clear_failures(username)
-    access_token = create_access_token(user.id)
+    access_token = create_access_token(user.id, token_version=user.token_version)
     expires_in = settings.jwt_expire_minutes * SECONDS_PER_MINUTE
     return LoginResponse(access_token=access_token, expires_in=expires_in)
 
 
-# 做什么：按主键取用户，并确认账号现在仍然可用
-# 入参：db_session 请求级会话；user_id 从 token 里解出来的用户 id
-# 返回：UserInfo，只含前端需要的列
-# 失败：账号已被删 -> TokenInvalidError；账号被停用 -> AccountDisabledError
-# 为什么每次请求都查一次库：token 有效期内账号可能被停用，不能只信纸面
-def get_active_user(db_session: Session, user_id: int) -> UserInfo:
-    # 新手注意：get 是"按主键直接翻到那一页"，比 select + where 少一层，主键查询用它最省事
-    user = db_session.get(User, user_id)
+# 做什么：按签发版本校验用户，修改凭证的请求可以锁住该用户行
+# 入参：数据库会话、验签结果和是否需要行锁
+# 返回：仍有效的 User；用户不存在或版本不同抛 TokenInvalidError，停用抛 AccountDisabledError
+def resolve_token_user(
+    db_session: Session, claims: AccessTokenClaims, *, lock_for_update: bool = False
+) -> User:
+    user_query = select(User).options(undefer(User.token_version)).where(User.id == claims.user_id)
+    if lock_for_update:
+        user_query = user_query.with_for_update()
+    user = db_session.scalar(user_query.execution_options(populate_existing=True))
     if user is None:
         raise TokenInvalidError()
-
+    if user.token_version != claims.token_version:
+        raise TokenInvalidError()
     if user.status != USER_STATUS_ACTIVE:
         raise AccountDisabledError()
-
-    return UserInfo.model_validate(user)
+    return user
 
 
 # 做什么：把请求头里的 token 换成当前用户
@@ -91,5 +95,16 @@ def get_active_user(db_session: Session, user_id: int) -> UserInfo:
 # 失败：验签或过期 -> TokenInvalidError；查不到人或已停用 -> 对应异常
 # 为什么单独一层：api 层只管"从请求头取字符串"，验签和查库属于业务，留在这里
 def resolve_current_user(db_session: Session, token: str) -> UserInfo:
-    user_id = decode_access_token(token)
-    return get_active_user(db_session, user_id)
+    claims = decode_access_token(token)
+    current_user = resolve_token_user(db_session, claims)
+    return UserInfo.model_validate(current_user)
+
+
+# 做什么：递增本人令牌版本，结束该账号当前所有已签发的登录凭证
+# 入参：未开启事务的会话和本人 bearer token
+# 返回：无；凭证失效或账号停用时抛对应业务异常
+def logout(db_session: Session, token: str) -> None:
+    claims = decode_access_token(token)
+    with db_session.begin():
+        current_user = resolve_token_user(db_session, claims, lock_for_update=True)
+        current_user.token_version += 1

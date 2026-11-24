@@ -37,11 +37,8 @@ uv run uvicorn app.main:app --reload --port 8081
 
 # 启动后自检：浏览器打开 http://127.0.0.1:8081/docs 能看到接口文档即成功
 
-# 跑测试
-uv run pytest -q
-
-# 不读取 .env 的完整隔离回归，使用虚拟凭证和内存数据库
-uv run --no-sync python -m pytest -p tests.isolated_settings -q
+# 日常隔离回归，自动加载测试配置，不读取 .env
+uv run --no-sync python -m pytest -q
 
 # 语法检查
 uv run python -m compileall app
@@ -205,7 +202,7 @@ CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "
 docker images mysql:8.4
 docker run --detach --rm --name fengxuan-capacity-1123-verify -e MYSQL_ROOT_PASSWORD=chat-isolated-only -e MYSQL_DATABASE=chat_verify -p 127.0.0.1:13317:3306 mysql:8.4
 docker exec fengxuan-capacity-1123-verify mysqladmin ping -uroot -pchat-isolated-only --silent
-uv run --no-sync python -m pytest -p tests.isolated_settings tests/mysql_chat_checks.py --chat-mysql-port 13317 -q
+uv run --no-sync python -m pytest tests/mysql_chat_checks.py --chat-mysql-port 13317 -q
 docker stop fengxuan-capacity-1123-verify
 ```
 

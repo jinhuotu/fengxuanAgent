@@ -66,3 +66,15 @@ def change_password_endpoint(
         db_session, token, payload.current_password, payload.new_password
     )
     return success(message="密码修改成功，请重新登录")
+
+
+# 做什么：接收退出请求并撤销本人已签发的登录凭证
+# 入参：Bearer token 和尚未开启事务的会话
+# 返回：统一成功响应；凭证无效时返回对应业务错误
+@router.post("/logout", summary="退出登录")
+def logout_endpoint(
+    token: str = Depends(get_access_token),
+    db_session: Session = Depends(get_db),
+) -> dict:
+    auth_service.logout(db_session, token)
+    return success(message="已退出登录")

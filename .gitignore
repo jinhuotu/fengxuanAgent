@@ -21,3 +21,6 @@ Thumbs.db
 
 # 命令输出日志：uv 等命令重定向到文件的产物，跑完即删，不进版本库
 *_log.txt
+
+# pytest 临时目录（addopts 里 --basetemp 指向这里）
+.pytest-tmp/

@@ -27,6 +27,12 @@ dev = [
     # 测试里直接调接口
 ]
 
+[tool.pytest.ini_options]
+# 默认加载隔离插件，让用例不连真实库。
+# --basetemp 固定临时根目录：本机 %TEMP% 下的 pytest-of-awen 被别的安全上下文锁住，
+# 不指定就会在收集阶段报 PermissionError。产物落在项目根的 .pytest-tmp（已 git 忽略）。
+addopts = "-p tests.isolated_settings --basetemp=.pytest-tmp"
+
 [tool.uv]
 # 这是一个应用，不是要发布到 PyPI 的库，不需要 build backend
 package = false

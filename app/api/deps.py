@@ -8,7 +8,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.errors import PermissionDeniedError, TokenInvalidError
+from app.core.errors import TokenInvalidError
 from app.db.session import get_db
 from app.schemas.auth import UserInfo
 from app.services import auth as auth_service
@@ -45,18 +45,6 @@ def get_current_user(
     return auth_service.resolve_current_user(db_session, credentials.credentials)
 
 
-# 做什么：在"已登录"的基础上再要求这个人是管理员
-# 入参：current_user 由 get_current_user 提供（已验过 token、已查过库、状态已确认 active）
-# 返回：UserInfo，管理员本人
-# 失败：不是管理员 -> PermissionDeniedError（403 / 2001）
-# 说明：阶段一没有角色表，直接看 users.is_admin；阶段二把它换成"查角色"就行，
-# 调用方（具体接口）不用改，因为它们只认这个依赖名
-def get_current_admin(current_user: UserInfo = Depends(get_current_user)) -> UserInfo:
-    if not current_user.is_admin:
-        raise PermissionDeniedError()
-    return current_user
-
-
 # 做什么：将当前用户交给服务检查是否拥有创建用户权限
 # 入参：已确认身份的用户和请求级数据库会话
 # 返回：有权限的用户；未登录、账号停用或无权限时抛对应业务异常
@@ -76,4 +64,28 @@ def require_user_list_permission(
     db_session: Session = Depends(get_db),
 ) -> UserInfo:
     rbac_service.ensure_permission(db_session, current_user.id, rbac_service.PERMISSION_USERS_LIST)
+    return current_user
+
+
+# 做什么：将当前用户交给服务检查是否拥有追加角色的权限
+# 入参：已确认身份的用户和请求级数据库会话
+# 返回：有权限的用户；未登录、停用或无权限时抛对应业务异常
+def require_role_assign_permission(
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db),
+) -> UserInfo:
+    rbac_service.ensure_permission(
+        db_session, current_user.id, rbac_service.PERMISSION_USERS_ASSIGN_ROLE
+    )
+    return current_user
+
+
+# 做什么：将当前用户交给服务检查是否拥有切换用户状态的权限
+# 入参：已验证身份的用户和请求级数据库会话
+# 返回：有权限的用户；未登录、停用或无权限时抛对应业务异常
+def require_user_disable_permission(
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db),
+) -> UserInfo:
+    rbac_service.ensure_permission(db_session, current_user.id, rbac_service.PERMISSION_USERS_DISABLE)
     return current_user

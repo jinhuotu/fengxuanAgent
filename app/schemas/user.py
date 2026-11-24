@@ -4,6 +4,8 @@
 两件事的生命周期不同，将来改权限相关字段时不想动登录的模型。
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.auth import NewPassword
@@ -28,6 +30,13 @@ class UserCreate(BaseModel):
     display_name: str | None = Field(
         default=None, max_length=MAX_DISPLAY_NAME_LENGTH, description="显示名，可不填"
     )
+
+
+# 做什么：声明管理员切换账号状态时提交的字段
+# 入参：active 或 disabled
+# 返回：合法的状态请求；其他状态或缺字段时校验失败
+class UserStatusChangeRequest(BaseModel):
+    status: Literal["active", "disabled"]
 
 
 # 做什么：声明用户列表分页参数并限制单页数量

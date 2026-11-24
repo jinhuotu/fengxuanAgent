@@ -21,6 +21,7 @@ fengxuanAgent/                        ✔ 已建 / □ 未建
 │  ├─ scripts.md                      ✔ 脚本清单：用途/参数/前置/部署顺序
 │  ├─ 术语表.md                       ✔ 概念 / 一句话解释 / 用在哪
 │  ├─ 新手导航.md                     ✔ 看不懂时的第一页：是什么/有什么/下一步
+│  ├─ 验收/                           ✔ 每阶段一份清单与自检结果，阶段二起
 │  ├─ archive/                        ✔ 历史版本，只读不改
 │  └─ rules/
 │     ├─ db.md                        ✔ 阶段一、二读
@@ -29,19 +30,19 @@ fengxuanAgent/                        ✔ 已建 / □ 未建
 ├─ app/                               ✔ 阶段一已建
 │  ├─ main.py                         ✔ 应用装配：CORS + 异常处理器 + auth/users 路由 + /health
 │  ├─ core/                           ✔ config.py ✔ / errors.py ✔ / logging.py ✔ / security.py ✔（bcrypt + JWT）
-│  ├─ api/                            ✔ deps.py（取当前用户、检查管理员身份）
-│  │  └─ v1/                          ✔ auth.py（登录、当前用户、本人改密）、users.py（分页列表、创建用户、追加角色）
+│  ├─ api/                            ✔ deps.py（取当前用户、按权限码提供守卫）
+│  │  └─ v1/                          ✔ auth.py（登录、当前用户、权限清单、本人改密、退出登录）、users.py（分页列表、创建用户、追加/撤销角色、切换状态）
 │  ├─ db/                             ✔ session.py ✔ / base.py ✔（Base + 约束命名规则）
 │  ├─ services/                       ✔ auth.py ✔ login_guard.py ✔ user.py（创建与分页查询）✔ password.py ✔ rbac.py（绑定与鉴权）
-│  ├─ models/                         ✔ user.py ✔（users 表，8 列）/ rbac.py ✔（roles、permissions、user_roles、role_permissions）/ __init__.py 负责登记模型
+│  ├─ models/                         ✔ user.py ✔（users 表，含登录令牌版本号）/ rbac.py ✔（roles、permissions、user_roles、role_permissions）/ __init__.py 负责登记模型
 │  ├─ schemas/                        ✔ auth.py ✔ user.py ✔（创建用户、列表分页参数和公开响应）✔ rbac.py（角色绑定请求）
 │  ├─ utils/                          ✔ response.py ✔（success 统一响应，准入：被两个以上模块使用）
 │  ├─ llm/                            ✔ client.py（流式 HTTP）+ prompts/chat.txt（系统提示词）
 │  ├─ rag/                            □ 阶段三建：切分、检索
 │  └─ agents/                         □ 阶段四建：角色与编排
 ├─ tests/                             ✔ test_errors.py、test_security.py、test_create_admin.py、test_password.py、test_rbac.py、test_user_list.py（分页查询）
-├─ scripts/                           ✔ create_admin.py ✔（造首个管理员）/ seed_rbac.py ✔（初始化角色与权限点）
-└─ alembic/                           ✔ env.py 已接 Base 与配置；versions/ 迁移链 f71b1c2caccf → a743e8871d18 → b5f0c2d9e8a7 → 01619bd6e169
+├─ scripts/                           ✔ create_admin.py ✔（造首个管理员）/ seed_rbac.py ✔（初始化角色与权限点）/ acceptance_stage2.py ✔（阶段二真实 HTTP 自检）
+└─ alembic/                           ✔ env.py 已接 Base 与配置；versions/ 迁移链 f71b1c2caccf → a743e8871d18 → b5f0c2d9e8a7 → 01619bd6e169 → 24c713a60f20 → 7e9204b6d815 → 9c4d16b8e2f1（当前 head）
 ```
 
 Python 包通过 `__init__.py` 声明包边界。`models/__init__.py` 还会导入表模型，供 Alembic 读取元数据。
@@ -67,10 +68,15 @@ Python 包通过 `__init__.py` 声明包边界。`models/__init__.py` 还会导�
 
 `GET /auth/me` 通过 `get_current_user` 取 Bearer token，由 service 验签并查询账号状态。
 `GET /auth/me/permissions` 复用当前用户依赖，调用 RBAC 服务返回 `{permissions: [...]}`；仅查本人，多角色权限去重并按权限码排序，无权限返回空数组，不按 is_admin 放行。无凭证或账号失效由既有身份依赖拒绝。
-`POST /auth/change-password` 通过 `get_access_token` 只取凭证，由改密 service 在未开启事务的会话中验签、开启事务并核验旧密码后更新。成功返回 `data: null`，旧密码错误为 `400/1006`。
+登录签发 JWT 时带用户当前令牌版本 `ver`，认证时与 `users.token_version` 比较。版本不同时返回 `401/1002`。迁移前签发且未过期的无版本令牌按版本 0 校验。
+`POST /auth/change-password` 校验凭证和旧密码后，在同一事务里更新密码和令牌版本。成功返回 `data: null`，旧密码错误为 `400/1006`。
+`POST /auth/logout` 校验本人凭证，在事务里递增令牌版本并返回 `data: null`。该账号此前签发的令牌随即失效。
 `POST /users` 通过 `require_user_creation_permission` 依赖，由 RBAC 服务检查 `users:create` 权限。`is_admin` 不替代角色授权；运行服务切换前须先确保现有管理员获得对应角色权限。
 `GET /users` 检查 `users:list`，按 page/page_size 返回 items/total/page/page_size。每条含 id/username/display_name/status/roles，角色仅含 code/name。先分页用户，再批量查该页角色，无角色返回 []；普通页三次 SQL，空页跳过角色查询。
-`POST /users/{user_id}/roles` 同样要求管理员，接收 `{role_code}`，返回 `{created}` 表示是否新增。鉴权会话与写入会话通过 `use_cache=False` 分开，由角色绑定服务管理写入事务；不会删除已有角色。
+`POST /users/{user_id}/roles` 检查 `users:assign_role`，接收 `{role_code}`，返回 `{created}` 表示是否新增。追加本人角色返回 `403/2003`。鉴权会话与写入会话通过 `use_cache=False` 分开，由角色绑定服务管理写入事务。
+`DELETE /users/{user_id}/roles/{role_code}` 同样检查 `users:assign_role`，返回 `data.removed`。撤销本人返回 `403/2003`。撤销 `admin` 前锁定角色行并统计其他启用管理员，数量为零时返回 `409/2004`。
+`PATCH /users/{user_id}/status` 检查 `users:disable`，接收 `active` 或 `disabled`，返回 `data.changed` 和 `data.status`。拒绝操作本人和停用最后一名启用管理员。停用时在同一事务里递增令牌版本，启用时保留版本。
+`GET /roles` 检查 `users:list`，在 `data.items` 中按角色代码排序返回 `code` 和 `name`。
 `services/rbac.py` 的 `has_permission()` 用 EXISTS 查询按多角色并集判断，停用账号不放行。`ensure_permission()` 在无权限时抛出 `PermissionDeniedError`，由依赖调用，接口层不写业务判断。
 
 ## 三、统一响应结构（已确认，按此实现）
@@ -82,6 +88,7 @@ Python 包通过 `__init__.py` 声明包边界。`models/__init__.py` 还会导�
 ```
 
 - `code` 为 0 表示成功。1001 表示用户名或密码错误，1002 表示凭证无效，1004 表示账号被锁定。错误码以 [errors.py](../app/core/errors.py) 为准。
+- `PATCH /users/{user_id}/status` 先检查 `users:disable` 权限。提交不支持的 `status` 值时，无权限返回 `403/2001`，有权限返回 `422/1000`。
 - HTTP 状态码仍然要正确使用（401/403/404/422），不要所有请求都返回 200。
 - 分页响应的 `data` 固定为：
 

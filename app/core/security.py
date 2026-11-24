@@ -10,6 +10,7 @@ JWT：字典 → 三段点分字符串（头.体.签名），服务端用密钥�
 
 import hmac
 from base64 import b64encode
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -25,10 +26,21 @@ settings = get_settings()
 # 签名算法。HS256 是"同一个密钥既签又验"的对称算法，单服务够用；
 # 换成非对称算法（RS256）要额外管公私钥，阶段一没必要
 JWT_ALGORITHM = "HS256"
+TOKEN_VERSION_CLAIM = "ver"
+INITIAL_TOKEN_VERSION = 0
 
 PASSWORD_HASH_PREFIX = "bcrypt-hmac-sha384-v1:"
 PASSWORD_PREHASH_ALGORITHM = "sha384"
 MIN_PASSWORD_PEPPER_BYTES = 32
+
+
+# 做什么：保存验签后业务需要的 JWT 字段
+# 入参：用户编号和令牌版本
+# 返回：不可变的令牌内容对象
+@dataclass(frozen=True)
+class AccessTokenClaims:
+    user_id: int
+    token_version: int
 
 
 # 做什么：对完整密码做带密钥的预哈希
@@ -69,28 +81,27 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
         return False
 
 
-# 做什么：把用户 id 签成 token，交给客户端带着
-# 入参：user_id，数据库里的用户主键
+# 做什么：把用户 id 和账号当前版本签进 token
+# 入参：数据库用户编号和令牌版本
 # 返回：JWT 字符串，三段点分
 # 为什么 sub 存字符串：JWT 规范要求 sub 是字符串，存 int 有些库校验会报错
-# 为什么 payload 只有三项：只放"是谁、何时签发、何时失效"，
-# 不放密码、手机号、角色名——JWT 只做了签名没有加密，任何人都能 base64 解出内容
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, token_version: int = INITIAL_TOKEN_VERSION) -> str:
     issued_at = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
+        TOKEN_VERSION_CLAIM: token_version,
         "iat": issued_at,
         "exp": issued_at + timedelta(minutes=settings.jwt_expire_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=JWT_ALGORITHM)
 
 
-# 做什么：验证 token 并取出用户 id
+# 做什么：验证 token 并取出用户编号和版本
 # 入参：客户端带来的 token 字符串
-# 返回：用户 id（int）
+# 返回：用户编号及令牌版本；迁移前未带版本的有效令牌按 0 解析
 # 失败：签名不对、过期、结构不对，一律抛 TokenInvalidError（转 401，code 1002）
 # 为什么统一抛同一个错：前端只需要知道"重新登录"，不该区分是过期还是伪造
-def decode_access_token(token: str) -> int:
+def decode_access_token(token: str) -> AccessTokenClaims:
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[JWT_ALGORITHM])
     except jwt.InvalidTokenError as exc:
@@ -99,7 +110,11 @@ def decode_access_token(token: str) -> int:
     user_id: Any = payload.get("sub")
     if user_id is None:
         raise TokenInvalidError()
+    # 新手注意：版本号像门禁卡批次，升批次后旧卡即使没过期也刷不开。
+    token_version = payload.get(TOKEN_VERSION_CLAIM, INITIAL_TOKEN_VERSION)
+    if type(token_version) is not int or token_version < INITIAL_TOKEN_VERSION:
+        raise TokenInvalidError()
     try:
-        return int(user_id)
+        return AccessTokenClaims(user_id=int(user_id), token_version=token_version)
     except (TypeError, ValueError) as exc:
         raise TokenInvalidError() from exc

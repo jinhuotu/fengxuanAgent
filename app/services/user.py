@@ -1,20 +1,30 @@
 """用户管理的业务逻辑。
 
-这里负责创建用户和分页读取公开的用户信息。
+这里负责创建用户、分页读取公开信息和切换账号状态。
 "调用的人是不是管理员"属于鉴权，交给 api/deps.py 的依赖判断，不写在这。
 """
 
+import logging
+
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
-from app.core.errors import UsernameTakenError
+from app.core.errors import (
+    CannotModifySelfError,
+    LastAdminProtectedError,
+    UserNotFoundError,
+    UsernameTakenError,
+)
 from app.core.security import hash_password
-from app.models.user import USER_STATUS_ACTIVE, User
+from app.models.user import USER_STATUS_ACTIVE, USER_STATUS_DISABLED, User
 from app.models.rbac import Role, UserRole
 from app.schemas.rbac import RoleSummary
 from app.schemas.auth import UserInfo
 from app.schemas.user import UserCreate, UserListItem, UserListQuery, UserListResponse
+from app.services.rbac import ADMIN_ROLE_CODE, count_active_role_holders
+
+logger = logging.getLogger(__name__)
 
 
 # 做什么：新建一个普通账号（是否需要管理员身份由上层依赖把关）
@@ -49,6 +59,47 @@ def create_user(db_session: Session, payload: UserCreate) -> UserInfo:
     # refresh 重新从库里读一次，UserInfo 才能拿到完整数据
     db_session.refresh(new_user)
     return UserInfo.model_validate(new_user)
+
+
+# 做什么：确认停用目标后仍有至少一名启用的管理员
+# 入参：处于写事务的会话和已锁定的目标用户
+# 返回：无；目标是最后一名启用管理员时抛 LastAdminProtectedError
+def _ensure_admin_remains_after_disable(db_session: Session, target_user: User) -> None:
+    if target_user.status != USER_STATUS_ACTIVE:
+        return
+    # 使用与撤销 admin 同一把角色行锁，避免两种操作各自检查通过。
+    role_query = select(Role.id).where(Role.code == ADMIN_ROLE_CODE).with_for_update()
+    admin_role_id = db_session.scalar(role_query)
+    if admin_role_id is None:
+        return
+    binding_query = select(UserRole.id).where(
+        UserRole.user_id == target_user.id, UserRole.role_id == admin_role_id
+    )
+    if db_session.scalar(binding_query) is None:
+        return
+    if count_active_role_holders(db_session, ADMIN_ROLE_CODE, target_user.id) == 0:
+        raise LastAdminProtectedError()
+
+
+# 做什么：切换他人的账号状态，并在停用时原子递增令牌版本
+# 入参：未开启事务的会话、操作者编号、目标用户编号和已校验的状态
+# 返回：改变成功 True，状态相同 False；操作本人、目标不存在或需保护管理员时抛业务异常
+def change_user_status(db_session: Session, operator_id: int, user_id: int, status: str) -> bool:
+    if operator_id == user_id:
+        raise CannotModifySelfError()
+    with db_session.begin():
+        user_query = select(User).options(undefer(User.token_version)).where(User.id == user_id)
+        target_user = db_session.scalar(user_query.with_for_update())
+        if target_user is None:
+            raise UserNotFoundError()
+        if target_user.status == status:
+            return False
+        if status == USER_STATUS_DISABLED:
+            _ensure_admin_remains_after_disable(db_session, target_user)
+            target_user.token_version += 1
+        target_user.status = status
+    logger.info("账号状态更新 | operator_id=%s | user_id=%s | status=%s", operator_id, user_id, status)
+    return True
 
 
 # 做什么：按用户编号升序分页查询，仅返回公开字段

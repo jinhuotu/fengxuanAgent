@@ -13,7 +13,7 @@ from app.db.base import Base
 from app.core.config import get_settings
 from app.core.security import create_access_token
 from app.main import app
-from app.models.rbac import Permission, Role, RolePermission
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from scripts import create_admin as admin_script
 
 
@@ -35,9 +35,11 @@ def isolated_user_sessions(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
             seed_session.add(Role(id=3, code="reader", name="只读测试角色"))
             seed_session.add(Permission(id=1, code="users:create", name="新建用户"))
             seed_session.add(Permission(id=2, code="users:list", name="查看用户列表"))
+            seed_session.add(Permission(id=3, code="users:assign_role", name="授予或撤销用户角色"))
             seed_session.flush()
             seed_session.add(RolePermission(role_id=1, permission_id=1))
             seed_session.add(RolePermission(role_id=1, permission_id=2))
+            seed_session.add(RolePermission(role_id=1, permission_id=3))
             seed_session.add(RolePermission(role_id=3, permission_id=2))
         monkeypatch.setattr(admin_script, "SessionLocal", test_sessions)
         monkeypatch.setattr(database_session, "SessionLocal", test_sessions)
@@ -71,9 +73,9 @@ def test_first_admin_can_create_users(isolated_user_sessions: None) -> None:
         assert current_user_response.status_code == 200
         assert current_user_response.json()["data"]["is_admin"] is True
 
-        assert_password_change_flow(client, username, password, headers)
-        assert_user_list_flow(client, headers, create_response.json()["data"]["id"])
-        assert_role_binding_flow(client, headers, create_response.json()["data"]["id"])
+        new_headers = assert_password_change_flow(client, username, password, headers)
+        assert_user_list_flow(client, new_headers, create_response.json()["data"]["id"])
+        assert_role_binding_flow(client, new_headers, create_response.json()["data"]["id"])
 
 
 # 做什么：验证管理员登录、校验当前密码和设置新密码共用字节上限。
@@ -103,6 +105,50 @@ def test_password_byte_limit_applies_to_login_and_change(isolated_user_sessions:
         assert client.post("/auth/login", json={"username": username, "password": new_password}).status_code == 200
 
 
+# 做什么：验证改密后，改密前签发的 token 立即失效
+# 入参：独立内存库会话
+# 返回：无；旧 token 未返回 401/1002 或新 token 无法使用时断言失败
+def test_password_change_rejects_old_token(isolated_user_sessions: None) -> None:
+    username = "password_version_admin"
+    password = "old-test-password"
+    new_password = "new-test-password"
+    admin_script.create_admin(username, password, display_name=None)
+    with TestClient(app) as client:
+        original_login = client.post("/auth/login", json={"username": username, "password": password})
+        assert original_login.status_code == 200
+        old_headers = {"Authorization": f"Bearer {original_login.json()['data']['access_token']}"}
+        assert client.get("/auth/me", headers=old_headers).status_code == 200
+        change_body = {"current_password": password, "new_password": new_password}
+        changed = client.post("/auth/change-password", headers=old_headers, json=change_body)
+        assert changed.status_code == 200
+        expired = client.get("/auth/me", headers=old_headers)
+        assert (expired.status_code, expired.json()["code"]) == (401, 1002)
+        replayed = client.post("/auth/change-password", headers=old_headers, json=change_body)
+        assert (replayed.status_code, replayed.json()["code"]) == (401, 1002)
+        new_login = client.post("/auth/login", json={"username": username, "password": new_password})
+        assert new_login.status_code == 200
+        new_headers = {"Authorization": f"Bearer {new_login.json()['data']['access_token']}"}
+        assert client.get("/auth/me", headers=new_headers).status_code == 200
+
+
+# 做什么：验证服务端退出递增版本，退出前的 token 立即失效
+# 入参：独立内存库会话
+# 返回：无；退出失败或旧 token 仍能访问时断言失败
+def test_logout_rejects_old_token(isolated_user_sessions: None) -> None:
+    username = "logout_version_admin"
+    password = "logout-test-password"
+    admin_script.create_admin(username, password, display_name=None)
+    with TestClient(app) as client:
+        login_body = {"username": username, "password": password}
+        login_response = client.post("/auth/login", json=login_body)
+        assert login_response.status_code == 200
+        headers = {"Authorization": f"Bearer {login_response.json()['data']['access_token']}"}
+        assert client.post("/auth/logout", headers=headers).status_code == 200
+        expired = client.get("/auth/me", headers=headers)
+        assert (expired.status_code, expired.json()["code"]) == (401, 1002)
+        assert client.post("/auth/login", json=login_body).status_code == 200
+
+
 # 做什么：确认内存模式按原规则连续失败 5 次后锁定
 # 入参：隔离内存库和用于关闭 Redis 的 monkeypatch
 # 返回：无；前 5 次不是 401/1001 或第 6 次不是 429/1004 就断言失败
@@ -124,8 +170,10 @@ def test_sixth_login_is_locked_in_memory_mode(
 
 # 做什么：检查改密接口的拒绝响应和成功后的登录行为
 # 入参：隔离客户端、登录名、旧密码和登录请求头
-# 返回：无；错误码或密码更新行为不符时断言失败
-def assert_password_change_flow(client: TestClient, username: str, password: str, headers: dict[str, str]) -> None:
+# 返回：改密后重新登录的认证头；错误码或登录行为不符时断言失败
+def assert_password_change_flow(
+    client: TestClient, username: str, password: str, headers: dict[str, str]
+) -> dict[str, str]:
     replacement_password = "replacement-test-password"
     change_body = {"current_password": password, "new_password": replacement_password}
     missing_token_response = client.post("/auth/change-password", json=change_body)
@@ -143,6 +191,7 @@ def assert_password_change_flow(client: TestClient, username: str, password: str
     assert old_login_response.status_code == 401
     new_login_response = client.post("/auth/login", json={"username": username, "password": replacement_password})
     assert new_login_response.status_code == 200
+    return {"Authorization": f"Bearer {new_login_response.json()['data']['access_token']}"}
 
 
 # 做什么：验证角色绑定接口的管理员门禁与重复绑定响应
@@ -170,7 +219,7 @@ def assert_role_binding_flow(client: TestClient, headers: dict[str, str], user_i
     assert missing_role_response.json()["code"] == 2002
 
 
-# 做什么：验证旧管理员标记不绕过权限，绑定角色后恢复建用户能力
+# 做什么：验证只有管理员标记时没有权限，隔离库预置 admin 角色后才有权限
 # 入参：隔离客户端及管理员登录请求头
 # 返回：无；未授权放行或角色绑定失败时断言失败
 def assert_initial_role_authorization(client: TestClient, headers: dict[str, str]) -> None:
@@ -183,8 +232,10 @@ def assert_initial_role_authorization(client: TestClient, headers: dict[str, str
     current_user_response = client.get("/auth/me", headers=headers)
     assert current_user_response.status_code == 200
     user_id = current_user_response.json()["data"]["id"]
-    bound_response = client.post(f"/users/{user_id}/roles", headers=headers, json={"role_code": "admin"})
-    assert bound_response.status_code == 200
+    denied_binding = client.post(f"/users/{user_id}/roles", headers=headers, json={"role_code": "admin"})
+    assert (denied_binding.status_code, denied_binding.json()["code"]) == (403, 2001)
+    with database_session.SessionLocal.begin() as seed_session:
+        seed_session.add(UserRole(user_id=user_id, role_id=1))
 
 
 # 做什么：验证用户列表的鉴权、分页、公开字段和参数校验
@@ -193,7 +244,10 @@ def assert_initial_role_authorization(client: TestClient, headers: dict[str, str
 def assert_user_list_flow(client: TestClient, headers: dict[str, str], user_id: int) -> None:
     permission_response = client.get("/auth/me/permissions", headers=headers)
     assert permission_response.status_code == 200
-    assert permission_response.json() == {"code": 0, "message": "成功", "data": {"permissions": ["users:create", "users:list"]}}
+    assert permission_response.json() == {
+        "code": 0, "message": "成功",
+        "data": {"permissions": ["users:assign_role", "users:create", "users:list"]},
+    }
     assert client.get("/users").status_code == 401
     normal_headers = {"Authorization": f"Bearer {create_access_token(user_id)}"}
     assert client.get("/auth/me/permissions", headers=normal_headers).json()["data"] == {"permissions": []}

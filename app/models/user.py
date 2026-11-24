@@ -52,6 +52,14 @@ class User(Base):
         comment="账号状态：active 正常，disabled 已停用",
     )
 
+    # 令牌版本校验接入前按需读取此列，普通用户查询可先于迁移部署。
+    token_version: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default=text("0"),
+        deferred=True,
+        comment="登录令牌版本号，用于使已签发的令牌失效",
+    )
+
     # 是否管理员：阶段一靠这一列决定"谁能建用户"。
     # 阶段二会引入角色表，到时把它迁成"用户挂角色"，这一列删除
     # server_default 写在数据库侧：老数据补列时不会留空值

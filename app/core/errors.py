@@ -24,6 +24,8 @@ CODE_CURRENT_PASSWORD_INCORRECT = 1006
 CODE_USER_NOT_FOUND = 1007
 CODE_PERMISSION_DENIED = 2001
 CODE_ROLE_NOT_FOUND = 2002
+CODE_CANNOT_MODIFY_SELF = 2003
+CODE_LAST_ADMIN_PROTECTED = 2004
 CODE_INTERNAL_ERROR = 5000
 
 DEFAULT_HTTP_STATUS = 400
@@ -140,6 +142,24 @@ class RoleNotFoundError(BusinessError):
     code = CODE_ROLE_NOT_FOUND
     http_status = 404
     message = "角色不存在"
+
+
+# 做什么：阻止操作者修改自己的角色或状态
+# 入参：无，使用固定错误文案
+# 返回：抛出后由全局处理器转成 403/2003
+class CannotModifySelfError(BusinessError):
+    code = CODE_CANNOT_MODIFY_SELF
+    http_status = 403
+    message = "不能修改自己的角色或状态"
+
+
+# 做什么：阻止撤销最后一名启用管理员的角色
+# 入参：无，使用固定错误文案
+# 返回：抛出后由全局处理器转成 409/2004
+class LastAdminProtectedError(BusinessError):
+    code = CODE_LAST_ADMIN_PROTECTED
+    http_status = 409
+    message = "系统至少保留一名管理员"
 
 
 # 做什么：把上面这些异常接住，转成统一响应结构
