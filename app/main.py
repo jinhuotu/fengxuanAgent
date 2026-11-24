@@ -16,6 +16,7 @@ from sqlalchemy import text
 from app.api.v1.auth import router as auth_router
 from app.api.v1.users import router as users_router
 from app.api.v1.chat import router as chat_router
+from app.api.v1.knowledge import router as knowledge_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
@@ -66,6 +67,7 @@ app.include_router(auth_router)
 # 用户管理路由：目前只有"管理员建用户"一个接口
 app.include_router(users_router)
 app.include_router(chat_router)
+app.include_router(knowledge_router)
 
 
 # 做什么：确认服务活着、数据库能连

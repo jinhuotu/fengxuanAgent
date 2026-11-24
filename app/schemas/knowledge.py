@@ -1,0 +1,45 @@
+"""个人知识库的请求、公开字段及分页结果。"""
+from datetime import datetime
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from app.schemas.user import DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE
+
+MAX_KNOWLEDGE_BASE_NAME_LENGTH = 50
+MAX_KNOWLEDGE_BASE_DESCRIPTION_LENGTH = 200
+MAX_KNOWLEDGE_BASE_PAGE_SIZE = 50
+
+
+class KnowledgeBaseCreate(BaseModel):
+    # 新手注意：先剪掉库名两头的空白，再量剩下的字符数。
+    name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_KNOWLEDGE_BASE_NAME_LENGTH)
+    ] = Field(description="库名")
+    description: str | None = Field(
+        default=None, max_length=MAX_KNOWLEDGE_BASE_DESCRIPTION_LENGTH, description="说明，可不填"
+    )
+
+
+class KnowledgeBaseListQuery(BaseModel):
+    page: int = Field(default=DEFAULT_PAGE_NUMBER, ge=1, description="页码，从一开始")
+    page_size: int = Field(
+        default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_KNOWLEDGE_BASE_PAGE_SIZE, description="每页条数"
+    )
+
+
+class KnowledgeBaseItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str | None
+    document_count: Literal[0] = 0
+    created_at: datetime
+
+
+class KnowledgeBaseListResponse(BaseModel):
+    items: list[KnowledgeBaseItem]
+    total: int
+    page: int
+    page_size: int

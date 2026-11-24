@@ -28,21 +28,21 @@ fengxuanAgent/                        ✔ 已建 / □ 未建
 │     ├─ llm.md                       ✔ 阶段三起读
 │     └─ agents.md                    □ 阶段四起才建
 ├─ app/                               ✔ 阶段一已建
-│  ├─ main.py                         ✔ 应用装配：CORS + 异常处理器 + auth/users 路由 + /health
+│  ├─ main.py                         ✔ 应用装配：CORS + 异常处理器 + auth/users/chat/knowledge 路由 + /health
 │  ├─ core/                           ✔ config.py ✔ / errors.py ✔ / logging.py ✔ / security.py ✔（bcrypt + JWT）
 │  ├─ api/                            ✔ deps.py（取当前用户、按权限码提供守卫）
-│  │  └─ v1/                          ✔ auth.py（登录、当前用户、权限清单、本人改密、退出登录）、users.py（分页列表、创建用户、追加/撤销角色、切换状态）
+│  │  └─ v1/                          ✔ auth.py（登录、当前用户、权限清单、本人改密、退出登录）、users.py（分页列表、创建用户、追加/撤销角色、切换状态）、chat.py（会话与流式问答）、knowledge.py（建库、本人库列表）
 │  ├─ db/                             ✔ session.py ✔ / base.py ✔（Base + 约束命名规则）
-│  ├─ services/                       ✔ auth.py ✔ login_guard.py ✔ user.py（创建与分页查询）✔ password.py ✔ rbac.py（绑定与鉴权）
-│  ├─ models/                         ✔ user.py ✔（users 表，含登录令牌版本号）/ rbac.py ✔（roles、permissions、user_roles、role_permissions）/ __init__.py 负责登记模型
-│  ├─ schemas/                        ✔ auth.py ✔ user.py ✔（创建用户、列表分页参数和公开响应）✔ rbac.py（角色绑定请求）
+│  ├─ services/                       ✔ auth.py ✔ login_guard.py ✔ user.py（创建与分页查询）✔ password.py ✔ rbac.py（绑定与鉴权）✔ knowledge.py（建库与分页查询）✔ chat_stream.py（流式编排）及 chat_turns / chat_context / chat_budget / chat_history / chat_requests / chat_recovery / chat_capacity / chat_prewarm
+│  ├─ models/                         ✔ user.py ✔（users 表，含登录令牌版本号）/ rbac.py ✔（roles、permissions、user_roles、role_permissions）/ chat.py ✔（chat_sessions、chat_messages、chat_generation_gates）/ knowledge.py ✔（knowledge_bases）/ __init__.py 负责登记模型
+│  ├─ schemas/                        ✔ auth.py ✔ user.py ✔（创建用户、列表分页参数和公开响应）✔ rbac.py（角色绑定请求）✔ chat.py（会话、消息与请求计划）✔ knowledge.py（建库、分页与公开字段）
 │  ├─ utils/                          ✔ response.py ✔（success 统一响应，准入：被两个以上模块使用）
 │  ├─ llm/                            ✔ client.py（流式 HTTP）+ prompts/chat.txt（系统提示词）
 │  ├─ rag/                            □ 阶段三建：切分、检索
 │  └─ agents/                         □ 阶段四建：角色与编排
-├─ tests/                             ✔ test_errors.py、test_security.py、test_create_admin.py、test_password.py、test_rbac.py、test_user_list.py（分页查询）
+├─ tests/                             ✔ test_errors.py、test_security.py、test_create_admin.py、test_password.py、test_rbac.py、test_user_list.py（分页查询）、test_knowledge.py（建库与私有分页）
 ├─ scripts/                           ✔ create_admin.py ✔（造首个管理员）/ seed_rbac.py ✔（初始化角色与权限点）/ acceptance_stage2.py ✔（阶段二真实 HTTP 自检）
-└─ alembic/                           ✔ env.py 已接 Base 与配置；versions/ 迁移链 f71b1c2caccf → a743e8871d18 → b5f0c2d9e8a7 → 01619bd6e169 → 24c713a60f20 → 7e9204b6d815 → 9c4d16b8e2f1（当前 head）
+└─ alembic/                           ✔ env.py 已接 Base 与配置；versions/ 迁移链 f71b1c2caccf → a743e8871d18 → b5f0c2d9e8a7 → 01619bd6e169 → 24c713a60f20 → 7e9204b6d815 → 9c4d16b8e2f1 → e1ea439850fc（当前 head）
 ```
 
 Python 包通过 `__init__.py` 声明包边界。`models/__init__.py` 还会导入表模型，供 Alembic 读取元数据。
