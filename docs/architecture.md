@@ -38,7 +38,7 @@ fengxuanAgent/                        ✔ 已建 / □ 未建
 │  ├─ schemas/                        ✔ auth.py ✔ user.py ✔（创建用户、列表分页参数和公开响应）✔ rbac.py（角色绑定请求）✔ chat.py（会话、消息与请求计划）✔ knowledge.py（建库与上传请求、分页、公开字段）
 │  ├─ utils/                          ✔ response.py ✔（success 统一响应，准入：被两个以上模块使用）
 │  ├─ llm/                            ✔ client.py（流式 HTTP）+ prompts/chat.txt（系统提示词）
-│  ├─ rag/                            ✔ chunking.py（纯文本切分）
+│  ├─ rag/                            ✔ chunking.py（纯文本切分）/ retrieval.py（MySQL 全文检索）
 │  └─ agents/                         □ 阶段四建：角色与编排
 ├─ tests/                             ✔ test_errors.py、test_security.py、test_create_admin.py、test_password.py、test_rbac.py、test_user_list.py（分页查询）、test_knowledge.py（知识库、文档和归属）
 ├─ scripts/                           ✔ create_admin.py ✔（造首个管理员）/ seed_rbac.py ✔（初始化角色与权限点）/ acceptance_stage2.py ✔（阶段二真实 HTTP 自检）
@@ -132,6 +132,10 @@ tests/test_chat_partial_save.py 使用 tests/partial_save_worker.py 在专用子
 `rag/chunking.py` 按空行划分段落，在较长段落内选取句末和重叠位置。切片偏移左闭右开，可直接从原文取回正文。
 `GET /knowledge-bases/{knowledge_base_id}/documents` 按文档编号倒序分页，返回公开字段。
 两个接口都复用登录校验，并按知识库编号、归属和软删除标志检查可见性。不可见时统一返回 `404/4001`。
+
+`POST /knowledge-bases/{knowledge_base_id}/search` 先检查知识库归属，再检索该库内本人未删除的切片。
+`rag/retrieval.py` 使用 MySQL ngram 自然语言全文检索，按相关性降序和切片编号升序返回至多 `top_k` 条。
+响应包含切片正文、章节路径、原文偏移和相关性得分。没有命中时返回空列表。
 
 `e1ea439850fc` 创建 `knowledge_bases`。`f12630e761c9` 新增 `knowledge_documents` 和库内列表索引。
 `e433f3124db0` 新增 `knowledge_chunks`。MySQL 的 ngram 全文索引由迁移创建。

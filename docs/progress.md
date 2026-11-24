@@ -101,3 +101,7 @@
 - 日期：2026-11-24。
 - 决定：阶段三加入 `knowledge_chunks` 表、`app/rag/chunking.py` 纯文本切分与 MySQL ngram 全文索引；上传在同一事务内写 `CHUNKING` 文档、同步切片、再置为 `READY`，无切片返回 `500/5000` 并整体回滚。迁移 `e433f3124db0` 已应用到开发库。
 - 原因：切片偏移左闭右开，`content[char_start:char_end]` 恒等于切片正文，是后续引用跳转与高亮的唯一依据；全文索引只写在迁移里并按方言判断，避免 SQLite 测试的 `create_all` 报错。全量回归 248 项通过（原 231 项 + 新增 17 项），开发库升级、回退、再升级均通过。
+
+- 日期：2026-11-24。
+- 决定：阶段三加入 `POST /knowledge-bases/{id}/search`；`app/rag/retrieval.py` 用 MySQL ngram 自然语言模式检索本人未删除切片，按相关性降序、编号升序返回至多 `top_k`（1~20）条，不返回 total。单字查询由接口层拒绝，不交给全文索引。
+- 原因：MATCH 必须走自然语言模式，`ColumnElement.match()` 固定生成 `IN BOOLEAN MODE`，故改用 `text()` 片段绑定参数。开发库实测 `EXPLAIN` 的 `type=fulltext`；ngram 二元切会把只共享一个二元组的噪声块召回（"会话锁"命中含"会话列表"的块，得分 0.54 对 2.17），本轮不加分数阈值，留到接对话时按 `top_k` 与预算处理。全量回归 261 项通过（原 248 项 + 新增 13 项）。

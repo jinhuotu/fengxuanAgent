@@ -1,10 +1,18 @@
-"""个人知识库的请求、公开字段及分页结果。"""
+"""个人知识库的请求、公开字段、分页和检索结果。"""
 from datetime import datetime
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from app.core.knowledge import DOCUMENT_CONTENT_LENGTH, DOCUMENT_TITLE_LENGTH, DocumentStatus
+from app.core.knowledge import (
+    DOCUMENT_CONTENT_LENGTH,
+    DOCUMENT_TITLE_LENGTH,
+    SEARCH_QUERY_MAX_CHARS,
+    SEARCH_QUERY_MIN_CHARS,
+    SEARCH_TOP_K_DEFAULT,
+    SEARCH_TOP_K_MAX,
+    DocumentStatus,
+)
 from app.schemas.user import DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE
 
 MAX_KNOWLEDGE_BASE_NAME_LENGTH = 50
@@ -68,3 +76,24 @@ class KnowledgeDocumentListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class KnowledgeChunkSearchRequest(BaseModel):
+    query: Annotated[str, StringConstraints(
+        strip_whitespace=True, min_length=SEARCH_QUERY_MIN_CHARS, max_length=SEARCH_QUERY_MAX_CHARS
+    )]
+    top_k: int = Field(default=SEARCH_TOP_K_DEFAULT, ge=1, le=SEARCH_TOP_K_MAX)
+
+
+class KnowledgeChunkSearchItem(BaseModel):
+    chunk_id: int
+    document_id: int
+    heading_path: str
+    content: str
+    char_start: int
+    char_end: int
+    score: float = Field(description="MySQL 全文检索的相关性得分")
+
+
+class KnowledgeChunkSearchResponse(BaseModel):
+    items: list[KnowledgeChunkSearchItem]

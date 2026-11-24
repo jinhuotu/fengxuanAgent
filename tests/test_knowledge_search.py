@@ -1,0 +1,120 @@
+"""用 SQLite 验证接口守卫，只编译 MySQL 查询文本。"""
+from unittest.mock import Mock
+
+import pytest
+from sqlalchemy.dialects import mysql
+
+from app.rag import retrieval
+from tests.test_knowledge import (
+    DELETED_BASE_ID,
+    KNOWLEDGE_BASE_URL,
+    MISSING_BASE_ID,
+    OTHER_BASE_ID,
+    OWNER_BASE_ID,
+    OWNER_ID,
+    document_bases,
+    knowledge_client,
+    knowledge_sessions,
+    owner_headers,
+)
+
+SEARCH_URL = f"{KNOWLEDGE_BASE_URL}/{OWNER_BASE_ID}/search"
+SEARCH_TERM = "知识库切片"
+
+
+# 做什么：记录搜索调用并返回可控的结果，隔离数据库相关的全文查询
+# 入参：pytest 的临时替换工具
+# 返回：默认返回空列表的搜索替身
+@pytest.fixture
+def search_stub(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    search = Mock(return_value=[])
+    monkeypatch.setattr(retrieval, "search_chunks", search)
+    return search
+
+
+# 做什么：验证搜索沿用登录依赖
+# 入参：隔离 HTTP 客户端与搜索替身
+# 返回：无；未返回 401/1002 或进入搜索时断言失败
+def test_search_requires_login(knowledge_client, search_stub) -> None:
+    response = knowledge_client.post(SEARCH_URL, json={"query": SEARCH_TERM})
+    assert response.status_code == 401 and response.json()["code"] == 1002
+    search_stub.assert_not_called()
+
+
+# 做什么：拒绝缺少查询词、长度越界或条数越界的请求
+# 入参：隔离客户端、本人请求头、测试库、搜索替身和非法请求体
+# 返回：无；未返回 422/1000 或进入搜索时断言失败
+@pytest.mark.parametrize("payload", [
+    {},
+    {"query": ""},
+    {"query": " 字\t"},
+    {"query": "字" * 201},
+    {"query": SEARCH_TERM, "top_k": 0},
+    {"query": SEARCH_TERM, "top_k": 21},
+])
+def test_search_rejects_invalid_params(knowledge_client, owner_headers, document_bases, search_stub, payload) -> None:
+    response = knowledge_client.post(SEARCH_URL, json=payload, headers=owner_headers)
+    assert response.status_code == 422 and response.json()["code"] == 1000
+    search_stub.assert_not_called()
+
+
+# 做什么：确认不可见的个人库在执行切片查询前统一拒绝
+# 入参：隔离客户端、本人请求头、测试库、搜索替身和不可见的库编号
+# 返回：无；未返回 404/4001 或进入搜索时断言失败
+@pytest.mark.parametrize("base_id", [OTHER_BASE_ID, DELETED_BASE_ID, MISSING_BASE_ID])
+def test_search_hides_inaccessible_bases(
+    knowledge_client, owner_headers, document_bases, search_stub, base_id
+) -> None:
+    response = knowledge_client.post(
+        f"{KNOWLEDGE_BASE_URL}/{base_id}/search", json={"query": SEARCH_TERM}, headers=owner_headers
+    )
+    assert response.status_code == 404 and response.json()["code"] == 4001
+    search_stub.assert_not_called()
+
+
+# 做什么：核对 MySQL SQL 的评分、过滤、排序与参数绑定
+# 入参：无，采用固定的库编号、用户编号与查询词
+# 返回：无；SQL 结构或绑定参数不符合预期时断言失败
+def test_mysql_search_sql_uses_natural_language_and_bound_parameters() -> None:
+    statement = retrieval.build_search_statement(OWNER_ID, OWNER_BASE_ID, SEARCH_TERM, 5)
+    compiled = statement.compile(dialect=mysql.dialect())
+    sql = " ".join(str(compiled).split())
+    assert sql.count("MATCH (knowledge_chunks.content) AGAINST (%s IN NATURAL LANGUAGE MODE)") == 2
+    assert "WHERE knowledge_chunks.knowledge_base_id = %s" in sql
+    assert "AND knowledge_chunks.owner_id = %s AND knowledge_chunks.is_deleted = %s" in sql
+    assert "ORDER BY score DESC, knowledge_chunks.id ASC LIMIT %s" in sql
+    assert SEARCH_TERM not in sql
+    assert compiled.positiontup == [
+        "term", "knowledge_base_id_1", "owner_id_1", "is_deleted_1", "term", "top_k",
+    ]
+    assert compiled.params == {
+        "term": SEARCH_TERM, "knowledge_base_id_1": OWNER_BASE_ID,
+        "owner_id_1": OWNER_ID, "is_deleted_1": 0, "top_k": 5,
+    }
+
+
+# 做什么：确认查询词先去空白，默认返回最多五条，并输出命中公开字段
+# 入参：隔离客户端、本人请求头、测试库和搜索替身
+# 返回：无；参数传递或响应字段不符时断言失败
+def test_search_returns_public_chunk_fields(knowledge_client, owner_headers, document_bases, search_stub) -> None:
+    chunk = {
+        "chunk_id": 8, "document_id": 3, "heading_path": "知识库说明 > 第2段",
+        "content": SEARCH_TERM, "char_start": 12, "char_end": 16, "score": 0.25,
+    }
+    search_stub.return_value = [chunk]
+    response = knowledge_client.post(SEARCH_URL, json={"query": f"  {SEARCH_TERM}\t"}, headers=owner_headers)
+    assert response.status_code == 200
+    assert response.json() == {"code": 0, "message": "成功", "data": {"items": [chunk]}}
+    assert search_stub.call_args.args[1:] == (OWNER_ID, OWNER_BASE_ID, SEARCH_TERM, 5)
+
+
+# 做什么：确认无命中返回空列表，并接受去空白后的合法参数上限
+# 入参：隔离客户端、本人请求头、测试库和返回空列表的搜索替身
+# 返回：无；空结果响应或有效参数传递不符时断言失败
+def test_search_returns_empty_items_without_matches(knowledge_client, owner_headers, document_bases, search_stub) -> None:
+    search_term = "字" * 200
+    payload = {"query": f" {search_term} ", "top_k": 20}
+    response = knowledge_client.post(SEARCH_URL, json=payload, headers=owner_headers)
+    assert response.status_code == 200
+    assert response.json() == {"code": 0, "message": "成功", "data": {"items": []}}
+    assert search_stub.call_args.args[1:] == (OWNER_ID, OWNER_BASE_ID, search_term, 20)

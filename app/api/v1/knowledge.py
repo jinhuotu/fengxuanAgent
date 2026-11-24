@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.schemas.auth import UserInfo
-from app.schemas.knowledge import KnowledgeBaseCreate, KnowledgeBaseListQuery, KnowledgeDocumentCreate
+from app.schemas.knowledge import (
+    KnowledgeBaseCreate,
+    KnowledgeBaseListQuery,
+    KnowledgeChunkSearchRequest,
+    KnowledgeDocumentCreate,
+)
 from app.services import knowledge as knowledge_service
 from app.utils.response import success
 
@@ -69,3 +74,19 @@ def list_knowledge_documents(
         db_session, current_user.id, knowledge_base_id, query
     )
     return success(documents.model_dump(mode="json"))
+
+
+# 做什么：接收知识库搜索请求并返回命中的切片
+# 入参：知识库编号、已校验的查询请求、当前用户和数据库会话
+# 返回：统一响应；未登录、知识库不可见或参数不合法时返回对应错误
+@router.post("/{knowledge_base_id}/search", summary="检索本人知识库切片")
+def search_knowledge_chunks(
+    knowledge_base_id: int,
+    payload: KnowledgeChunkSearchRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db),
+) -> dict:
+    matches = knowledge_service.search_knowledge_chunks(
+        db_session, current_user.id, knowledge_base_id, payload
+    )
+    return success(matches.model_dump(mode="json"))

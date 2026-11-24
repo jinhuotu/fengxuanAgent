@@ -1,16 +1,20 @@
-"""个人知识库与文档的创建、分页查询。"""
+"""个人知识库与文档的创建、分页查询和检索。"""
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import KnowledgeBaseNotFoundError
 from app.core.knowledge import DocumentStatus
 from app.models.knowledge import IS_NOT_DELETED, KnowledgeBase, KnowledgeChunk, KnowledgeDocument
+from app.rag import retrieval
 from app.rag.chunking import split_document
 from app.schemas.knowledge import (
     KnowledgeBaseCreate,
     KnowledgeBaseItem,
     KnowledgeBaseListQuery,
     KnowledgeBaseListResponse,
+    KnowledgeChunkSearchItem,
+    KnowledgeChunkSearchRequest,
+    KnowledgeChunkSearchResponse,
     KnowledgeDocumentCreate,
     KnowledgeDocumentItem,
     KnowledgeDocumentListResponse,
@@ -173,3 +177,17 @@ def list_knowledge_documents(
     return KnowledgeDocumentListResponse(
         items=document_items, total=total, page=query.page, page_size=query.page_size
     )
+
+
+# 做什么：检查知识库归属后检索切片，组装命中的公开字段
+# 入参：请求级会话、当前用户编号、知识库编号和已校验的搜索请求
+# 返回：切片命中列表；知识库不可见时抛 KnowledgeBaseNotFoundError
+def search_knowledge_chunks(
+    db_session: Session, owner_id: int, knowledge_base_id: int, payload: KnowledgeChunkSearchRequest
+) -> KnowledgeChunkSearchResponse:
+    _require_owned_knowledge_base(db_session, owner_id, knowledge_base_id)
+    chunk_rows = retrieval.search_chunks(
+        db_session, owner_id, knowledge_base_id, payload.query, payload.top_k
+    )
+    items = [KnowledgeChunkSearchItem.model_validate(chunk_row) for chunk_row in chunk_rows]
+    return KnowledgeChunkSearchResponse(items=items)
