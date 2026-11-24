@@ -4,13 +4,16 @@
 错误密码验不过、改一个字符的 token 验不过。这些一旦被改坏，登录就有安全问题。
 """
 
+import bcrypt
 import jwt
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import get_settings
-from app.core.errors import TokenInvalidError
+from app.core.errors import PasswordHashUnavailableError, TokenInvalidError
 from app.core.security import (
     JWT_ALGORITHM,
+    PASSWORD_HASH_PREFIX,
     create_access_token,
     decode_access_token,
     hash_password,
@@ -44,6 +47,50 @@ def test_wrong_password_fails_without_raising() -> None:
 # 返回：无
 def test_broken_hash_returns_false() -> None:
     assert verify_password("anything", "not-a-bcrypt-hash") is False
+    assert verify_password("anything", PASSWORD_HASH_PREFIX + "not-a-bcrypt-hash") is False
+
+
+# 做什么：确认已经退役的无版本 bcrypt 哈希不再参与认证
+# 入参：无，使用测试专用密码构造一条无版本哈希
+# 返回：无；还接受无版本哈希时断言失败
+def test_unversioned_password_hash_is_rejected() -> None:
+    password = "legacy-test-password"
+    unversioned_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+    assert not verify_password(password, unversioned_hash)
+
+
+# 做什么：拒绝字符数合规但 UTF-8 字节超限的待存密码
+# 入参：无，使用三个字节的汉字构造超限输入
+# 返回：无；哈希入口未拒绝超限输入时断言失败
+def test_hash_rejects_password_over_utf8_byte_limit() -> None:
+    with pytest.raises(ValueError, match="128"):
+        hash_password("密" * 43)
+
+
+# 做什么：确认新版哈希覆盖完整密码，且能放进现有列
+# 入参：无，使用恰好 128 字节的测试密码
+# 返回：无；长度边界或校验结果不符时断言失败
+def test_versioned_hash_uses_the_complete_password() -> None:
+    long_password = "密" * 42 + "ab"
+    password_hash = hash_password(long_password)
+    assert password_hash.startswith(PASSWORD_HASH_PREFIX)
+    assert len(password_hash) <= 100
+    assert verify_password(long_password, password_hash)
+    assert not verify_password(long_password + "c", password_hash)
+    assert not verify_password("密" * 42 + "ac", password_hash)
+
+
+# 做什么：确认缺少密钥时新版哈希无法读写
+# 入参：monkeypatch 临时清空隔离配置里的密钥
+# 返回：无；未报配置问题时断言失败
+def test_versioned_hash_requires_a_pepper(monkeypatch: pytest.MonkeyPatch) -> None:
+    password = "configured-test-password"
+    password_hash = hash_password(password)
+    monkeypatch.setattr(settings, "password_pepper", SecretStr(""))
+    with pytest.raises(PasswordHashUnavailableError):
+        hash_password(password)
+    with pytest.raises(PasswordHashUnavailableError):
+        verify_password(password, password_hash)
 
 
 # 做什么：确认 token 签出去能原样解回来

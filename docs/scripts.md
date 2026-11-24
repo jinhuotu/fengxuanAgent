@@ -58,7 +58,7 @@ uv run python scripts/seed_rbac.py
 6. 起服务：`uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8000`
 7. 自检：`GET /health` 返回 `database: ok`，`POST /auth/login` 能拿到 token。管理员验收还需检查 `GET /auth/me` 的 `is_admin` 和实际建用户结果。
 
-先迁移建表，再运行初始化脚本。用新建账号登录后，确认 `GET /auth/me` 返回 `is_admin=true`。携带同一个 token 调用 `POST /users`，应成功创建 `is_admin=false` 的普通账号。
+先迁移建表，再运行初始化脚本。用新建账号登录后，确认 `GET /auth/me` 返回 `is_admin=true`。当前源码要求创建用户者持有 `users:create`；仅初始化管理员标记还不够，需经明确授权完成角色绑定后，再验证 `POST /users` 可创建普通账号。
 
 ## 四、新增脚本的登记模板
 

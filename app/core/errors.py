@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-# 错误码规则：1000-1999 参数与认证类；2000-2999 权限类；5000 起是系统级。
+# 错误码规则：1000-1999 认证类；2000-2999 权限类；3000-3999 对话类；5000 起是系统级。
 # 前端靠 code 判断具体原因，靠 HTTP 状态码判断大类，两者都要对，不能一律返回 200。
 CODE_INVALID_PARAMS = 1000
 CODE_INVALID_CREDENTIALS = 1001
@@ -20,7 +20,10 @@ CODE_TOKEN_INVALID = 1002
 CODE_ACCOUNT_DISABLED = 1003
 CODE_ACCOUNT_LOCKED = 1004
 CODE_USERNAME_TAKEN = 1005
+CODE_CURRENT_PASSWORD_INCORRECT = 1006
+CODE_USER_NOT_FOUND = 1007
 CODE_PERMISSION_DENIED = 2001
+CODE_ROLE_NOT_FOUND = 2002
 CODE_INTERNAL_ERROR = 5000
 
 DEFAULT_HTTP_STATUS = 400
@@ -63,6 +66,23 @@ class TokenInvalidError(BusinessError):
     message = "登录状态无效或已过期，请重新登录"
 
 
+# 做什么：修改密码时旧密码校验失败
+# 入参：可选自定义提示
+# 返回：抛出后由全局处理器转成 400，密码保持不变
+class CurrentPasswordIncorrectError(BusinessError):
+    code = CODE_CURRENT_PASSWORD_INCORRECT
+    message = "旧密码错误"
+
+
+# 做什么：新版密码哈希所需的密钥不可用
+# 入参：无，统一使用公开错误文案
+# 返回：抛出后由全局处理器转成 503
+class PasswordHashUnavailableError(BusinessError):
+    code = CODE_INTERNAL_ERROR
+    http_status = 503
+    message = "密码服务暂不可用，请联系管理员"
+
+
 # 做什么：账号被管理员停用
 # 入参：可选自定义提示
 # 返回：无（抛出后转 403，表示"身份已知但无权限"）
@@ -102,6 +122,24 @@ class PermissionDeniedError(BusinessError):
     code = CODE_PERMISSION_DENIED
     http_status = 403
     message = "没有权限执行此操作"
+
+
+# 做什么：角色绑定时找不到目标用户
+# 入参：可选自定义提示
+# 返回：抛出后由全局处理器转成 404，数据库不写入
+class UserNotFoundError(BusinessError):
+    code = CODE_USER_NOT_FOUND
+    http_status = 404
+    message = "用户不存在"
+
+
+# 做什么：角色绑定时找不到指定角色
+# 入参：可选自定义提示
+# 返回：抛出后由全局处理器转成 404，数据库不写入
+class RoleNotFoundError(BusinessError):
+    code = CODE_ROLE_NOT_FOUND
+    http_status = 404
+    message = "角色不存在"
 
 
 # 做什么：把上面这些异常接住，转成统一响应结构

@@ -1,154 +1,42 @@
-# 项目进度与待定项（docs/progress.md）
+# 项目进度与待定项
+> 当前状态截至 2026-11-24；只保留当前状态、下一步和重要约束。
 
-> 本文件是**唯一允许频繁改动**的文档，但每次是"覆盖重写"，不是往后追加。
-> 超过 30 行就说明该清理了：已完成的步骤删掉，只留当前状态、下一步和踩坑。
-> 开工第一件事读本文件；每轮结束把状态更新回来。
+## 当前状态
+- 阶段一：登录、本人改密等核心流程已有用户验收。
+- 阶段二：角色追加、创建权限、用户列表及当前权限清单已接通，前端入口和按钮已按权限控制；未标记阶段二整体验收通过。
+- 用户已明确跳过普通账号手动验收，不再安排该步骤；跳过不记为已验收。
+- 阶段三：DeepSeek deepseek-flash 流式对话及本人历史已实现并隔离验证，真实启用待完成；知识库和阶段四未开始。
+- 用户已暂停逐小步讲解、六十行及逐步确认；后续按完整功能推进，仍遵守可读性、分层和安全规则。
+- MySQL 保存完整历史；第七项按完整请求预算选择最近完整成功轮次并提示裁剪，Redis 缓存有界候选及标记，按用户/会话/版本隔离，TTL 到期或故障回源。
+- 请求 UUID 去重及会话行锁保护占用；第八项完成通知不等待缓存，后台有界预热；前端非阻塞校准可立即追问，旧历史响应不覆盖新消息。
+- 第五项：全站最多 10 个有效生成占用，不设用户总上限；同用户跨会话并行，同会话限 1；前端切换不中断，关闭或离开页面中断本页面全部任务。
+- 模型错误按认证、权限、限流、计费、请求、超时、连接和协议分类；历史标识、SSE 错误码及安全日志一致，前端展示固定文案；不透传上游错误正文。
+- 生成中正文默认每 2 秒限频保存；过期占用由启动及周期后台扫描自动恢复为中断，保留正文；有效占用不处理，访问时惰性恢复仍保留。
+- 已获批准：redis>=5.2,<6，实际锁定 5.3.1；httpx==0.28.1 已从开发依赖移至运行依赖，uv.lock 已更新。
+- 最终验证：本轮后端 172 passed、1 项既有警告；前端对话 56 passed、布局 3 passed；类型检查、构建、compileall 和可读性检查通过；真实 HTTP 观察/断线及临时前端 /chat 200，服务均正常关闭。
+- 第六项：按原 UUID 查询本人结果，未知时有限确认、不自动重发；最近失败/中断问题先查资格，再用新 UUID 手动重试，事务内二次校验；详见 [AI 对话说明](chat.md)。
 
-## 一、当前状态（2026-11-21）
+## 下一步与待定
+- 使用者自行在本地配置 LLM_API_KEY；本轮未读取或修改 .env，未发送真实付费模型请求。
+- 真实项目库须先执行迁移至 7e9204b6d815：增加准入锁表及占用索引；两条对话迁移已在独立库核验结构及中文注释，未代执行真实库迁移。
+- 启用命令见 docs/commands.md 和 docs/chat.md；当前后端 8081、前端 5178、MySQL 3307、Redis 6380。
+- 待真实模型、页面和部署代理联调验收；不将自动测试记为用户验收。
+- 角色分配仍使用 is_admin 门禁，是否改权限码待定；未自行添加停用、角色删除或管理他人会话。
+- 既有 RBAC 外键、旧表类型、连接池参数及建用户事务规范差异保留待定；本轮未顺手重构。
 
-- 阶段一后端功能已实现。`POST /auth/login`、`GET /auth/me`、`POST /users` 已挂载，登录失败锁定已接入。前端进度仍记录完整浏览器验收待完成。
-- 阶段二已有 RBAC 四张表和种子脚本。用户分配角色、接口按权限码鉴权仍待实现。`POST /users` 当前检查 `users.is_admin`。
-- 源码迁移链为 `f71b1c2caccf`（建 users）→ `a743e8871d18`（加管理员标记）→ `b5f0c2d9e8a7`（补中文注释）→ `01619bd6e169`（建 RBAC 表）。目标库实际版本和注释以实查为准。
-- 新库初始化已修复。`create_admin.py` 为新账号写入 `is_admin=True`，隔离测试覆盖登录、当前用户和建用户。目标 MySQL 库和浏览器仍待验收，见 [脚本说明](scripts.md)。
-- 待确认数据库差异。[数据库规范](rules/db.md) 禁止物理外键，现有 RBAC 关联表使用级联外键。建用户服务在服务层显式提交，规范要求使用 `with session.begin()`。处理方案待确认。
-- 既有表使用 `INT` 主键，未普遍实现规范中的软删除字段。`users.status` 是字符串，连接池回收时间为 3600 秒，规范写的是 1800 秒。以上差异仍待确认。
+## 本轮决定
+- 日期：2026-11-23。
+- 决定：保留前八项，完成第九项标签页标识通知、可见校准、远端快照观察、登录变化清理及严格本页任务归属；有效任务 2 秒/空闲 10 秒校准，无新依赖、配置或迁移，第十项未开始。
+- 原因：先复现缺失状态查询、三处交错边界及缓存缺口，再验证权限、过期、新旧 UUID、观察不误停、账号更换和隐藏恢复；未读取或修改 .env、未调用付费模型，无临时脚本，页面实际验收待用户完成。
 
-## 二、阶段进度
+- 日期：2026-11-24。
+- 决定：新密码至少 8 个字符、最多 128 个 UTF-8 字节。新版使用带版本标记的 HMAC-SHA-384、Base64 和 bcrypt。现有管理员用旧密码登录后手动改密，启动前按[命令文档](commands.md)配置并备份 PASSWORD_PEPPER。
+- 原因：修复 bcrypt 截断，同时保留唯一存量管理员的登录和改密路径。隔离测试 176 项通过，语法检查通过，真实账号由用户完成改密。
 
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| 阶段一 | 登录（管理员建用户、登录、JWT 校验、/auth/me） | 功能已实现，完整浏览器验收仍待记录 |
-| 阶段二 | RBAC 权限（角色、权限、接口鉴权、多账号验证） | 建表和种子脚本已完成，接口鉴权待接入 |
-| 阶段三 | 对话 + 知识库（模型调用、SSE、检索） | 未开始 |
-| 阶段四 | 多智能体协作 | 未开始 |
+- 日期：2026-11-24。
+- 决定：只读确认本机库剩 1 个启用管理员且哈希已是新版，移除无版本 bcrypt 兼容和 72 字节截断。登录及改密统一检查 128 个 UTF-8 字节。
+- 原因：旧哈希数量已归零，现有管理员继续使用当前密码。隔离回归 177 项通过，语法检查通过，无依赖或数据库结构变更。
 
-## 三、阶段一历史实现与验收记录
-
-以下数据库状态和测试结果记录的是各步骤当时的环境。
-
-1. ~~安装依赖~~ **已完成**：uv 管理，`uv.lock` 已生成，`.venv` 内 41 个包导入验证通过。
-2. ~~建阶段一目录骨架~~ **已完成**：`app/` 七个目录 + `tests/` + `scripts/`，`__init__.py` 已放（`scripts/` 除外）。
-3. ~~建 `.env.example` + `core/config.py`~~ **已完成**：九字段模板；`Settings` 无默认值的 `db_password`/`jwt_secret`；
-   `get_settings()` 加 `lru_cache`；正向取值与缺值报错两条验收都通过。
-4. ~~建 `core/errors.py`、`core/logging.py`~~ **已完成**：业务异常三类 + 三个全局处理器；日志一次初始化、幂等；`tests/test_errors.py` 2 条用例通过。
-5. ~~写 `db/session.py`（引擎 + `get_db` 依赖），连上 MySQL 执行 `SELECT 1`~~ **已完成**：
-   `select 1` = 1、`database()` = fengxuan_agent、`version()` = 8.4.13、字符集 utf8mb4、池 size 5。
-6. ~~跑通 `GET /health`，确认 uvicorn 能起、`/docs` 能打开~~ **已完成**：`/health` 200 返回
-   `{"code":0,"message":"成功","data":{"status":"ok","database":"ok"}}`，`/docs` 与 `/openapi.json` 均 200。
-   期间踩到一个真实错误：`setup_logging()` 忘了传 `app_env`，启动直接 TypeError，已修。
-7. ~~初始化 alembic，建 `users` 表，生成并执行迁移~~ **已完成**：`alembic init alembic`；
-   `db/base.py` 定 `Base` 与约束命名规则；`models/user.py` 七列；autogenerate 生成 `f71b1c2caccf`；
-   `upgrade head` 后 `describe users` 七列齐全、`username` 为 UNI；`downgrade -1` 再 `upgrade head` 往返成功。
-8. ~~`core/security.py`（bcrypt 哈希 + JWT 签发/验签）~~ **已完成**：四个函数
-   `hash_password` / `verify_password` / `create_access_token` / `decode_access_token`；
-   `tests/test_security.py` 六条用例，全套 `8 passed`。实测哈希 60 字符、`$2b$12$` 前缀、token 三段、能解回 user_id。
-9. ~~`scripts/create_admin.py`（一次性脚本造首个管理员）~~ **已完成**：`--username` / `--display-name`，密码交互式输入、
-   两次确认、最短 8 位；先查重再插入（重跑不改数据）。实测插入成功、哈希前缀 `$2b$12$`、`status=active`、
-   `created_at` 由数据库生成；验证用的 `smoke_admin` 已删除，`users` 表当前 0 行，等我自己建账号。
-10. ~~`POST /auth/login`（校验密码 + 签发 token）+ "取当前用户"依赖 + `GET /me`~~ **已完成**：
-    4 小块全部落地——`schemas/auth.py`（三个模型）、`services/auth.py`（`authenticate_user` / `login` /
-    `get_active_user` / `resolve_current_user`）、`api/v1/auth.py`（登录与 `/me`，`main.py` 已挂路由）、
-    `api/deps.py`（`HTTPBearer` 取头 + 转交 service）。
-    实测五条路径：登录成功 200、密码错 401+1001、带 token `/me` 200、无 token 401+1002、
-    坏 token 401+1002、停用账号 403+1003（登录与 `/me` 都是 403）；`pytest` 仍 8 条全绿。
-
-11. ~~补做：管理员身份列 `users.is_admin`~~ **已完成**：`models/user.py` 加 `Boolean` 列（`default=False`、
-    `server_default=text("0")`），`UserInfo` 与前端 `types/api.ts` 同步加 `is_admin`；
-    `autogenerate` 生成 `a743e8871d18`，手工补了一句数据回填
-    `UPDATE users SET is_admin = 1 WHERE username = 'admin'`（理由：新列默认 0，不回填就没人能调建用户接口）。
-    验证：`describe users` 8 列、`TINYINT` 类型；`admin` 行 `is_admin=True`；`pytest 8 passed`；`alembic current = a743e8871d18 (head)`。
-
-12. ~~补做：表和列的中文注释~~ **已完成**：`models/user.py` 8 列全带 `comment` + `__table_args__` 表注释；
-    迁移 `b5f0c2d9e8a7` **手写**（autogenerate 不比对 comment，只会生成空迁移）；
-    用 `ALTER TABLE ... MODIFY COLUMN` 照 `SHOW CREATE TABLE` 原定义抄一遍再加 COMMENT，
-    不用 `op.alter_column`，因为它可能丢 `AUTO_INCREMENT` / 默认值 / 字符集。
-    验证：`SHOW FULL COLUMNS` 8 条中文注释齐全，`Type`/`Null`/`Key`/`Default`/`Extra` 与改前一致；
-    `SHOW CREATE TABLE` 末尾出现 `COMMENT='用户表：…'`；`pytest 8 passed`。
-    唯一差异：`varchar` 从只显示 `COLLATE` 变成显式带 `CHARACTER SET utf8mb4`，语义相同。
-    规则同步：`AGENTS.md` 第三节、`learning-contract.md` 检查清单、`architecture.md` 的 `models/` 职责各加一条。
-
-13. ~~管理员建用户 `POST /users`~~ **已完成**：新增三个文件 —— `schemas/user.py`（`UserCreate`，密码 8-128 位）、
-    `services/user.py`（`create_user`：查重 → 哈希 → 插入 → 撞唯一索引时 `rollback` 转 409 → `refresh` 读回时间戳）、
-    `api/v1/users.py`（`POST /users`，依赖 `get_current_admin`）；
-    `deps.py` 加 `get_current_admin`（先 `get_current_user`，再判 `is_admin`）；
-    `errors.py` 加 `CODE_USERNAME_TAKEN=1005`（409）与 `CODE_PERMISSION_DENIED=2001`（403，按文件顶部 2000 段约定）。
-    实测六条：管理员建用户 200 + `is_admin=False`；同名 409/1005；5 位密码 422/1000；无 token 401/1002；
-    普通用户调用 403/2001；新账号用新密码登录 200/0。临时账号已清理，`users` 表只剩 `admin`。
-    前端暂无建用户页面，接口先用 `/docs` 或脚本调。
-
-## 阶段二进度
-
-14. ~~第 1 步：建 RBAC 四张表~~ **已完成**：`models/rbac.py` 四个模型（`Role` / `Permission` / `UserRole` /
-    `RolePermission`），每个表带表注释、每个列带中文 `comment`；
-    `models/__init__.py` 已登记；迁移 `01619bd6e169` 由 autogenerate 生成并 `upgrade head`。
-    结构验证：`roles.code`、`permissions.code` 各有唯一索引；`user_roles` 有 `UNI(user_id, role_id)`、
-    `ix_user_roles_role_id`、两条 `ON DELETE CASCADE` 外键；`role_permissions` 有 `UNI(role_id, permission_id)`、
-    `ix_role_permissions_permission_id`、两条 `ON DELETE CASCADE` 外键。
-    建表时四张表为空，`users.is_admin` 未动，`pytest 8 passed`，`compileall` 通过。
-
-15. ~~第 2 步：种子数据~~ **已完成**：`scripts/seed_rbac.py`，三个权限点（`users:create` / `users:disable` / `users:list`）、
-    两个角色（`admin` 挂三项、`user` 不挂）；每个权限点、角色、授权关系都先按 code 查再插，
-    重跑不重复、也不重置授权时间；全脚本只在末尾 commit 一次，中途失败不落半条。
-    实测连跑两次：第一次新增 3 权限 + 2 角色 + 3 条授权，第二次零新增；
-    行数 `roles=2` / `permissions=3` / `role_permissions=3` / `user_roles=0`。
-    已登记 `docs/scripts.md` 第二节，部署顺序补了第 5 步。
-
-## 四、阶段一已定方案（已拍板，按此执行）
-
-1. **token：JWT**，`PyJWT` 实现，HS256 签名，有效期 **30 分钟**，阶段一不做 refresh token。
-   副作用先接受：登出后旧 token 在过期前仍然有效；阶段三上 Redis 时加"登出黑名单"补这个洞。
-   Payload 只放 `sub`（用户 id）、`exp`、`iat`，**不放密码、手机号、角色名**。
-2. **统一响应结构：确认**，按 `docs/architecture.md` 第三节执行（`code`/`message`/`data`，分页固定四字段）。
-3. **登录失败锁定：先内存实现**，同一账号连续失败 5 次锁 10 分钟，进程内字典 + 时间戳。
-   阶段三迁 Redis 时再改，届时正好体会"重启就丢、多进程不共享"。
-4. **使用者范围：我自己测试 + 会创建其他人员并分配权限做测试**。
-   推论：登录必须支持多账号，阶段二必须至少有两个角色（管理员 / 普通用户）用来验证 403。
-5. **前端来源：`http://127.0.0.1:5176` 与 `http://localhost:5176`**，写进 `CORS_ORIGINS`。
-6. **注册：不做公开注册**，改为"管理员创建用户"接口（需要管理员 token 才能调）。
-   users 表保留 `status` 字段，管理员可停用账号。
-
-## 五、阶段一必须守住的两个细节
-
-- 登录失败返回给客户端的提示要统一为"用户名或密码错误"，**不要区分是账号不存在还是密码错**（防探测账号）。
-- 首个管理员通过一次性脚本初始化。当前脚本授权问题见本页当前状态和 [脚本说明](scripts.md)。
-
-## 六、踩坑记录（第一次出现的错误先记这里，重复 2 次才升级进 AGENTS.md）
-
-格式：`日期 | 现象 | 原因 | 怎么解决的`
-
-- 2026-11-19 | 用管道给 `scripts/create_admin.py` 喂密码时进程挂住不动 | `getpass` 在非交互终端不读标准输入，`msvcrt` 一直等键盘 | 该脚本只能人工在真实终端执行；自动化验证改为直接调用 `create_admin()` 函数
-- 2026-11-19 | VS Code 终端报"无法将 uv 项识别为 cmdlet"，重启 VS Code 后仍报 | winget 装 uv 时改了用户 PATH，但终端进程用的是启动那一刻拷贝的旧值，重启没拿到新值 | 建 `~\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`，新终端启动时按需把 uv 目录补进 PATH；全新 shell 验证 `uv 0.13.9` 可用
-- 2026-11-19 | 跑 pytest 出现 `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead` | Starlette 1.10 起 TestClient 推荐 httpx2，当前版本仍兼容 | 暂不处理，测试能跑通；等它真报错再换 httpx2，现在换会牵动 dev 依赖
-- 2026-11-20 | 调 `db_session.scalar_one_or_none(...)` 报 `AttributeError: 'Session' object has no attribute` | `one_or_none` 在 `ScalarResult` 上，不在 `Session` 上；写法和 `scalar` 不是一回事 | 改成 `db_session.scalars(select(...)).one_or_none()`，真跑一次才发现
-- 2026-11-20 | 模型加了 `comment`，autogenerate 却生成一份空迁移 | Alembic 的 autogenerate 默认不比对 comment，只比对列/索引/约束的形状 | 改注释的迁移一律手写，用 `op.execute` 写 `ALTER ... MODIFY COLUMN`
-- 2026-11-20 | 差点用 `op.alter_column` 改注释 | MySQL 改注释走 `MODIFY COLUMN`，会重写整列定义，漏参数就丢 `AUTO_INCREMENT`、默认值、字符集 | 照 `SHOW CREATE TABLE` 抄完整定义再补 `COMMENT`，改完用 `SHOW FULL COLUMNS` 逐列核对
-- 2026-11-20 | 第一版 RBAC 迁移漏了 `user_roles.role_id` 的索引 | 联合唯一索引 `(user_id, role_id)` 的最左列是 `user_id`，按角色反查走不到它；模型里忘写 `index=True` | 补 `index=True` 后重生成迁移；重生成前先删掉那份没执行过的迁移，否则两份迁移会同时以 `b5f0c2d9e8a7` 为父，形成分叉
-- 2026-11-20 | 验证脚本查不到接口刚创建的用户，报 `NoResultFound` | MySQL 默认隔离级别 REPEATABLE READ，同一会话第一次查询就开了事务，之后看不到别的连接提交的新行 | 脚本里查询前先 `db.commit()` 结束旧事务，下一次查询才读得到
-
-## 七、关键决策记录（追加三行：日期 / 决定了什么 / 为什么）
-
-- 2026-11-19 | 技术栈 FastAPI + SQLAlchemy 2.0 同步 + MySQL 8 | 体量小、同步写法更易读，异步复杂度暂不承担
-- 2026-11-19 | AGENTS.md 拆为宪法 + 5 份专项文档 | 单文件 327 行，状态类内容会过期，按阶段生效的规则提前占上下文
-- 2026-11-19 | token 用 JWT，30 分钟，不做 refresh | 无需存储即可验签，先把签发/验签/过期这条链路学完整；黑名单留到阶段三
-- 2026-11-19 | 密码哈希直接用 bcrypt，不用 passlib | passlib 1.7.4 与 bcrypt 4.1+ 有已知兼容告警，多一层封装反而多一个坑
-- 2026-11-19 | 不做公开注册，改管理员建用户 | 只有内部测试使用，避免暴露注册入口和重复的校验逻辑
-- 2026-11-20 | 管理员身份先用 `users.is_admin` 布尔列，不提前上角色表 | 阶段一只需要回答"这个人能不能建用户"；角色表留到阶段二，届时把这一列迁成角色关联
-- 2026-11-20 | 越权返 403 + code 2001，用户名重复返 409 + 1005 | 错误码按 `errors.py` 顶部分段（2000-2999 权限类）；409 表示请求合法但与服务器现状冲突，前端可提示换个名字
-- 2026-11-20 | 多角色冲突取并集：任一角色持有该权限点即放行 | 判定写成"查存不存在"，SQL join 只要命中一行就算过，天然就是并集，不需要算交集或定优先级
-- 2026-11-20 | 权限点命名统一 `资源:动作`，全小写，资源用复数 | `users:create`、`users:disable`、`knowledge:read`；固定格式才能在代码里写死字符串并做唯一索引，避免 `user:create` 和 `users.create` 混用
-- 2026-11-19 | 依赖改用 uv（pyproject.toml + uv.lock），废弃 requirements.txt | 锁文件跨平台记录 wheel，Windows 开发 / Linux 部署一致；比 pip 快且能顺手管虚拟环境
-- 2026-11-19 | 前端独立项目 `F:\code\python\fengxuanAgent-web`（Vue3 + TS + Vite + Element Plus，端口 5176） | 前后端分离，各自依赖互不影响；跨域用 Vite 代理 `/api` → 8000，后端 CORS 白名单作第二道保险
-- 2026-11-19 | 登录响应字段定为 `{ access_token, token_type, expires_in }` | 前端 `src/types/api.ts` 已按此定义，后端第 10 步必须照此实现，否则联调对不上
-- 2026-11-19 | 数据库与缓存放 Docker（`docker-compose.yml`），MySQL 映射 3307、Redis 映射 6380 | 本机 3306/6379 已被本地服务占用、另一套容器占 13306/26379，单独开一对端口互不干扰；容器化也和服务器保持一致
-- 2026-11-19 | 索引源固定为清华镜像，写进 pyproject.toml | 本机 pip 配置里混着多个镜像，不显式固定会导致锁文件里的源随机变化
-- 2026-11-20 | 后端路由前缀 `/auth`，前端 `/api` 由 Vite 代理去掉 | 浏览器看到同源请求，后端路径不带 /api，两边各自干净；改前缀必须同时改 vite.config.ts
-- 2026-11-20 | 登录 service 收原始 `username` / `password`，不收整个 `LoginRequest` | 保持 service 不被 HTTP 形状绑住，脚本或别的入口也能复用
-- 2026-11-20 | 失败锁定返回 429 + 1004；账号不存在也计数，账号停用不计数；锁定期内正确密码也拒 | 前端能分清"密码错"和"被锁"；不存在的也计数，防止被用来探测账号是否存在
-
-- 日期 2026-11-21
-- 决定按源码同步接口、阶段状态、迁移和初始化说明，保留历史验收记录。
-- 原因是代码实现、目标库状态和用户验收分别需要不同证据。
-
-- 日期 2026-11-21
-- 决定在创建首个管理员时显式写入 `is_admin=True`。
-- 原因是未设置该字段时会沿用普通用户默认值，登录后调用建用户接口会返回 403。
+- 日期：2026-11-24。
+- 决定：登录失败计数和锁定复用 Redis 连接。计数在最后一次失败后空闲 600 秒过期，第 5 次失败锁定 600 秒。停用 Redis 时走内存，故障时记 ERROR 后回退。
+- 原因：Redis 内原子递增和上锁，多进程共享状态。全量隔离回归 183 项和语法检查通过。Docker Redis 6380 以隔离账号验证后端重启后仍返回 429/1004。

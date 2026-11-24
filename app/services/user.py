@@ -1,18 +1,20 @@
 """用户管理的业务逻辑。
 
-这里只管"怎么把一个人建进库"：查重、哈希、插入。
+这里负责创建用户和分页读取公开的用户信息。
 "调用的人是不是管理员"属于鉴权，交给 api/deps.py 的依赖判断，不写在这。
 """
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import UsernameTakenError
 from app.core.security import hash_password
 from app.models.user import USER_STATUS_ACTIVE, User
+from app.models.rbac import Role, UserRole
+from app.schemas.rbac import RoleSummary
 from app.schemas.auth import UserInfo
-from app.schemas.user import UserCreate
+from app.schemas.user import UserCreate, UserListItem, UserListQuery, UserListResponse
 
 
 # 做什么：新建一个普通账号（是否需要管理员身份由上层依赖把关）
@@ -47,3 +49,41 @@ def create_user(db_session: Session, payload: UserCreate) -> UserInfo:
     # refresh 重新从库里读一次，UserInfo 才能拿到完整数据
     db_session.refresh(new_user)
     return UserInfo.model_validate(new_user)
+
+
+# 做什么：按用户编号升序分页查询，仅返回公开字段
+# 入参：数据库会话和已校验的分页参数
+# 返回：当前页、总人数及分页信息；数据库错误直接抛出
+def list_users(db_session: Session, query: UserListQuery) -> UserListResponse:
+    total_users = db_session.scalar(select(func.count()).select_from(User))
+    offset_count = (query.page - 1) * query.page_size
+    user_query = select(User.id, User.username, User.display_name, User.status)
+    user_query = user_query.order_by(User.id).offset(offset_count).limit(query.page_size)
+    user_rows = db_session.execute(user_query).mappings().all()
+    user_ids = [user_row["id"] for user_row in user_rows]
+    roles_by_user = get_roles_by_user(db_session, user_ids)
+    user_items: list[UserListItem] = []
+    for user_row in user_rows:
+        user_item = UserListItem.model_validate(user_row)
+        user_item.roles = roles_by_user.get(user_item.id, [])
+        user_items.append(user_item)
+    return UserListResponse(
+        items=user_items, total=total_users, page=query.page, page_size=query.page_size
+    )
+
+
+# 做什么：一次查询当前页用户的角色，并按用户编号分组
+# 入参：数据库会话和当前页用户编号列表
+# 返回：用户编号到角色列表的映射；空页返回空字典，数据库错误直接抛出
+def get_roles_by_user(db_session: Session, user_ids: list[int]) -> dict[int, list[RoleSummary]]:
+    if not user_ids:
+        return {}
+    role_query = select(UserRole.user_id, Role.code, Role.name).join(Role, Role.id == UserRole.role_id)
+    role_query = role_query.where(UserRole.user_id.in_(user_ids)).order_by(UserRole.user_id, Role.id)
+    role_rows = db_session.execute(role_query).all()
+    # 新手注意：按用户分篮子，每个篮子只装这个用户的角色。
+    roles_by_user: dict[int, list[RoleSummary]] = {}
+    for role_row in role_rows:
+        role_item = RoleSummary(code=role_row.code, name=role_row.name)
+        roles_by_user.setdefault(role_row.user_id, []).append(role_item)
+    return roles_by_user

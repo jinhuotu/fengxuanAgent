@@ -21,13 +21,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select  # noqa: E402  导入顺序被迫后置，原因见上面的 sys.path
 
+from app.core.errors import PasswordHashUnavailableError  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
+from app.core.password_policy import (  # noqa: E402
+    MAX_PASSWORD_BYTES,
+    MIN_PASSWORD_LENGTH,
+    validate_password_byte_limit,
+)
 from app.core.security import hash_password  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.user import USER_STATUS_ACTIVE, User  # noqa: E402
-
-# 密码最短长度。定 8 是随手可记和够难猜之间的折中，不是安全标准，真正的标准看你的使用场景
-MIN_PASSWORD_LENGTH = 8
 
 logger = get_logger(__name__)
 
@@ -77,13 +80,22 @@ def main() -> None:
     if len(password) < MIN_PASSWORD_LENGTH:
         logger.error("密码太短，至少 %d 位", MIN_PASSWORD_LENGTH)
         sys.exit(1)
+    try:
+        validate_password_byte_limit(password)
+    except ValueError:
+        logger.error("管理员 %s 的密码最多 %d 个 UTF-8 字节", args.username, MAX_PASSWORD_BYTES)
+        sys.exit(1)
 
     confirm = getpass.getpass("请再输入一次：")
     if password != confirm:
         logger.error("两次输入的密码不一致")
         sys.exit(1)
 
-    create_admin(args.username, password, args.display_name)
+    try:
+        create_admin(args.username, password, args.display_name)
+    except PasswordHashUnavailableError:
+        logger.error("无法创建管理员 %s，请为当前进程配置有效的 PASSWORD_PEPPER", args.username)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

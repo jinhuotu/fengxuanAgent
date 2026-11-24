@@ -5,15 +5,27 @@
 """
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+from app.core.password_policy import (
+    MAX_PASSWORD_BYTES,
+    MIN_PASSWORD_LENGTH,
+    validate_password_byte_limit,
+)
 
 # 用户名上限与 users.username 的 String(50) 保持一致，超长在入库前就被拦下
 MAX_USERNAME_LENGTH = 50
 
-# 密码上限按字符数算，128 足够覆盖正常密码；
-# 真正参与 bcrypt 计算的只有前 72 字节，那段截断在 core/security.py 里统一做
-MAX_PASSWORD_LENGTH = 128
+PasswordInput = Annotated[str, AfterValidator(validate_password_byte_limit)]
+NewPassword = Annotated[
+    PasswordInput,
+    Field(
+        min_length=MIN_PASSWORD_LENGTH,
+        description=f"至少 {MIN_PASSWORD_LENGTH} 个字符，最多 {MAX_PASSWORD_BYTES} 个 UTF-8 字节",
+    ),
+]
 
 # token 类型固定 bearer：前端拼请求头时写 "Bearer {access_token}"
 TOKEN_TYPE_BEARER = "bearer"
@@ -24,8 +36,8 @@ TOKEN_TYPE_BEARER = "bearer"
 # 返回：字段齐全且类型正确得到一个实例；缺字段或类型不对由框架转 422
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=MAX_USERNAME_LENGTH, description="登录名")
-    password: str = Field(
-        min_length=1, max_length=MAX_PASSWORD_LENGTH, description="明文密码，只用于本次校验"
+    password: PasswordInput = Field(
+        min_length=1, description=f"登录密码，最多 {MAX_PASSWORD_BYTES} 个 UTF-8 字节"
     )
 
 
@@ -36,6 +48,16 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str = TOKEN_TYPE_BEARER
     expires_in: int  # 有效期，单位秒；前端可用来提示"还剩多久要重新登录"
+
+
+# 做什么：声明当前用户修改密码时提交的字段
+# 入参：旧密码和新密码；用户身份由登录凭证提供
+# 返回：校验通过的请求对象；字段缺失或长度不符时校验失败
+class ChangePasswordRequest(BaseModel):
+    current_password: PasswordInput = Field(
+        min_length=1, description=f"当前密码，最多 {MAX_PASSWORD_BYTES} 个 UTF-8 字节"
+    )
+    new_password: NewPassword
 
 
 # 做什么：声明当前用户信息，GET /me 的返回体

@@ -10,21 +10,38 @@
 - 虚拟环境：`.venv`，**由 uv 维护，日常不需要手动激活**
 - 数据库 / 缓存：**Docker**（`docker-compose.yml`），MySQL 映射 3307、Redis 映射 6380
 - 索引源：清华 PyPI 镜像，写在 `pyproject.toml` 的 `[[tool.uv.index]]`
-- 项目路径：`F:\code\python\fengxuanAgent`，服务端口 8000
+- 项目路径：`D:\code\LLM\fengxuanAgent`，服务端口 8081
+<!-- 历史端口：后端 8000。 -->
 
 ## 二、日常命令（全部以 uv 开头，不用先 Activate）
+
+当前本机前端代理目标为 8081。重启联调后端时，先在原服务终端按 `Ctrl+C` 停止。
+
+密码哈希需要 `PASSWORD_PEPPER`。部署时从密钥管理注入同一份独立随机密钥，
+例如 32 个随机字节的 Base64 文本。服务和首管脚本使用同一份密钥，重启时继续复用。
+本地可在 PowerShell 7.2 或更新版本的同一终端中隐藏输入并启动：
+
+```powershell
+$env:PASSWORD_PEPPER = Read-Host -MaskInput '输入已保存的 PASSWORD_PEPPER'
+uv run --no-sync uvicorn app.main:app --reload --port 8081
+```
+
+登录和改密所提交的密码最多 128 个 UTF-8 字节。设置新密码时至少输入 8 个字符。
 
 ```powershell
 # 按 uv.lock 把依赖装齐（最常用；改完 pyproject 也跑这个）
 uv sync
 
 # 启动开发服务（改代码自动重启）
-uv run uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8081
 
-# 启动后自检：浏览器打开 http://127.0.0.1:8000/docs 能看到接口文档即成功
+# 启动后自检：浏览器打开 http://127.0.0.1:8081/docs 能看到接口文档即成功
 
 # 跑测试
 uv run pytest -q
+
+# 不读取 .env 的完整隔离回归，使用虚拟凭证和内存数据库
+uv run --no-sync python -m pytest -p tests.isolated_settings -q
 
 # 语法检查
 uv run python -m compileall app
@@ -82,6 +99,14 @@ docker compose down -v
 端口约定：容器里的 3306 映射到本机 **3307**，Redis 的 6379 映射到 **6380**。
 原因是本机 3306 和 6379 已被本地安装的服务占用，另一个项目又占了 13306 / 26379，
 本项目单独用一对端口，互不干扰。所以 `.env` 里 `DB_PORT` 必须是 3307。
+
+登录保护使用现有 Redis 配置。设置 `REDIS_ENABLED=false` 时走进程内存。连接故障时也会回退，日志级别为 `ERROR`。
+检查项目 Redis 的端口映射和响应：
+
+```powershell
+docker port fengxuan-redis 6379/tcp
+docker exec fengxuan-redis redis-cli ping
+```
 
 ## 二之三、数据库迁移（alembic）
 
@@ -157,18 +182,32 @@ cryptography 50.0.2  pytest 9.2.0          httpx 0.28.1
 3. uv 的进度输出走 **stderr**，PowerShell 里 `2>&1` 会显示成 NativeCommandError，
    只要看到 `Resolved` / `Installed` 就是成功，不要被红字吓到。
 4. 看到 `Failed to hardlink files ... UV_LINK_MODE=copy`：缓存和 `.venv` 不在同一个盘
-   （你的项目在 F 盘、缓存在 C 盘）。不影响使用，想消掉警告就设 `UV_LINK_MODE=copy`。
+   （你的项目在 D 盘、缓存在 C 盘）。不影响使用，想消掉警告就设 `UV_LINK_MODE=copy`。
 
 ## 六、部署时（Dockerfile 里怎么用，等部署阶段再落地）
+
+AI 对话已批准运行依赖为 `redis>=5.2,<6`、`httpx==0.28.1`，锁定 Redis 客户端 5.3.1。
+迁移、配置和当前 8081/5178 启动顺序见 [AI 对话说明](chat.md)。
 
 ```dockerfile
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev          # --frozen：绝不重新解析，只用锁文件
 COPY app ./app
-CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081"]
 ```
 
 ## 七、常见报错
+
+全站并发控制新增迁移 `7e9204b6d815`，运行新代码前先由使用者执行 `uv run alembic upgrade head`。
+下面只用于临时 `chat_verify` 隔离验证，不读取 `.env`，不使用项目 MySQL 容器或数据卷；容器退出自动清理自身测试数据。
+
+```powershell
+docker images mysql:8.4
+docker run --detach --rm --name fengxuan-capacity-1123-verify -e MYSQL_ROOT_PASSWORD=chat-isolated-only -e MYSQL_DATABASE=chat_verify -p 127.0.0.1:13317:3306 mysql:8.4
+docker exec fengxuan-capacity-1123-verify mysqladmin ping -uroot -pchat-isolated-only --silent
+uv run --no-sync python -m pytest -p tests.isolated_settings tests/mysql_chat_checks.py --chat-mysql-port 13317 -q
+docker stop fengxuan-capacity-1123-verify
+```
 
 | 报错最后一行 | 大概率原因 |
 |---|---|

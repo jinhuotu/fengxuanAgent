@@ -15,10 +15,14 @@ from sqlalchemy import text
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.users import router as users_router
+from app.api.v1.chat import router as chat_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
 from app.db.session import SessionLocal
+from app.db import session as database_session
+from app.services.chat_recovery import recovery_lifespan
+from app.services.chat_prewarm import prewarm_lifespan
 from app.utils.response import success
 
 settings = get_settings()
@@ -27,15 +31,19 @@ setup_logging(settings.app_env)
 logger = get_logger(__name__)
 
 
-# 做什么：启动和关闭时各打一行日志，方便在日志里分清"服务重启"和"请求失败"
+# 做什么：记录启停并托管过期生成恢复任务
 # 入参：app 由 FastAPI 传入
 # 返回：异步上下文管理器
-# 为什么不在这里连库：库没起来时服务还应该能启动，让 /health 报出"库不通"，
-# 比整个进程起不来更容易判断问题出在容器还是代码。
+# 恢复扫描在后台连接数据库，故障不阻塞启动，由 /health 继续报告数据库状态。
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("服务启动 | 环境=%s", settings.app_env)
-    yield
+    async with recovery_lifespan(database_session.SessionLocal), prewarm_lifespan() as prewarm_queue:
+        app.state.chat_prewarm_queue = prewarm_queue
+        try:
+            yield
+        finally:
+            app.state.chat_prewarm_queue = None
     logger.info("服务关闭")
 
 
@@ -57,6 +65,7 @@ register_exception_handlers(app)
 app.include_router(auth_router)
 # 用户管理路由：目前只有"管理员建用户"一个接口
 app.include_router(users_router)
+app.include_router(chat_router)
 
 
 # 做什么：确认服务活着、数据库能连

@@ -4,10 +4,12 @@
 换哈希算法、换 token 算法，只改这一个文件，不用满项目搜。
 
 两个概念先记住：
-bcrypt：密码 → 60 字符哈希串，里面自带随机盐，所以同一个密码每次结果都不同，只能比对不能还原。
+bcrypt：哈希自带随机盐，所以同一个密码每次结果都不同，只能比对不能还原。
 JWT：字典 → 三段点分字符串（头.体.签名），服务端用密钥验签名，不用存库也能确认"这封介绍信没被改过"。
 """
 
+import hmac
+from base64 import b64encode
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -15,7 +17,8 @@ import bcrypt
 import jwt
 
 from app.core.config import get_settings
-from app.core.errors import TokenInvalidError
+from app.core.errors import PasswordHashUnavailableError, TokenInvalidError
+from app.core.password_policy import MAX_PASSWORD_BYTES, validate_password_byte_limit
 
 settings = get_settings()
 
@@ -23,36 +26,46 @@ settings = get_settings()
 # 换成非对称算法（RS256）要额外管公私钥，阶段一没必要
 JWT_ALGORITHM = "HS256"
 
-# bcrypt 只处理密码的前 72 字节，第 73 个字节起直接丢弃；
-# bcrypt 5.x 遇到超长密码会直接报错，所以这里显式截断，保证哈希和校验口径一致
-BCRYPT_MAX_BYTES = 72
+PASSWORD_HASH_PREFIX = "bcrypt-hmac-sha384-v1:"
+PASSWORD_PREHASH_ALGORITHM = "sha384"
+MIN_PASSWORD_PEPPER_BYTES = 32
 
 
-# 做什么：把明文密码转成 bcrypt 需要的字节，并截断到 72 字节以内
-# 入参：任何字符串密码（中文按 utf-8 编码后可能比字符数长）
-# 返回：不超过 72 字节的 bytes
-def _to_bcrypt_bytes(plain_password: str) -> bytes:
-    return plain_password.encode("utf-8")[:BCRYPT_MAX_BYTES]
+# 做什么：对完整密码做带密钥的预哈希
+# 入参：密码的完整 UTF-8 字节
+# 返回：64 个 Base64 字节；密钥不合格时抛出 PasswordHashUnavailableError
+# 新手注意：HMAC 像用服务器独有的印章给整封信盖章，信的末尾变化也会改变结果。
+def _prehash_password(password_bytes: bytes) -> bytes:
+    pepper_bytes = settings.password_pepper.get_secret_value().encode("utf-8")
+    if len(pepper_bytes) < MIN_PASSWORD_PEPPER_BYTES:
+        raise PasswordHashUnavailableError()
+    return b64encode(hmac.digest(pepper_bytes, password_bytes, PASSWORD_PREHASH_ALGORITHM))
 
 
 # 做什么：把明文密码变成哈希串，准备存进 users.password_hash
 # 入参：用户输入的明文密码
-# 返回：60 字符左右的哈希串，自带盐；同样的密码每次调用结果都不同
-# 新手注意：就像把纸塞进碎纸机，出来的碎片拼不回原文；加盐等于每次碎之前先撒一把不同的沙子
+# 返回：带算法版本和随机盐的哈希；超限或缺少密钥时抛出异常
 def hash_password(plain_password: str) -> str:
-    return bcrypt.hashpw(_to_bcrypt_bytes(plain_password), bcrypt.gensalt()).decode("utf-8")
+    validate_password_byte_limit(plain_password)
+    bcrypt_input = _prehash_password(plain_password.encode("utf-8"))
+    password_hash = bcrypt.hashpw(bcrypt_input, bcrypt.gensalt()).decode("ascii")
+    return PASSWORD_HASH_PREFIX + password_hash
 
 
-# 做什么：校验明文密码与数据库里的哈希是否匹配
-# 入参：用户这次输入的明文、库里存的哈希串
-# 返回：True 匹配；False 不匹配（包括哈希串被手改坏的情况）
-# 为什么返回布尔而不是抛异常：密码对不对是登录流程里的一个判断，由 service 决定怎么提示
+# 做什么：用完整密码校验带版本标记的哈希
+# 入参：用户输入的明文和数据库中的哈希
+# 返回：匹配时 True；密码错误、超限或格式不支持时 False；密钥不可用时抛出异常
 def verify_password(plain_password: str, password_hash: str) -> bool:
+    if not password_hash.startswith(PASSWORD_HASH_PREFIX):
+        return False
     try:
-        return bcrypt.checkpw(_to_bcrypt_bytes(plain_password), password_hash.encode("utf-8"))
+        password_bytes = plain_password.encode("utf-8")
+        if len(password_bytes) > MAX_PASSWORD_BYTES:
+            return False
+        bcrypt_hash = password_hash.removeprefix(PASSWORD_HASH_PREFIX)
+        return bcrypt.checkpw(_prehash_password(password_bytes), bcrypt_hash.encode("ascii"))
     except ValueError:
-        # 哈希串格式不对（长度不够、不是 bcrypt 格式）时 checkpw 会抛 ValueError，
-        # 这种情况等于"验证不通过"，不该让整个请求 500
+        # bcrypt 无法识别的哈希或无法编码的输入都按校验失败处理。
         return False
 
 

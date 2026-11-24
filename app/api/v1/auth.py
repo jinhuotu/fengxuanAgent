@@ -7,10 +7,12 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_access_token, get_current_user
 from app.db.session import get_db
-from app.schemas.auth import LoginRequest, UserInfo
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, UserInfo
 from app.services import auth as auth_service
+from app.services import password as password_service
+from app.services import rbac as rbac_service
 from app.utils.response import success
 
 # 前缀 /auth 与前端 src/api/auth.ts 的 '/auth/login' 对上；
@@ -37,3 +39,30 @@ def login_endpoint(payload: LoginRequest, db_session: Session = Depends(get_db))
 @router.get("/me", summary="当前用户")
 def me_endpoint(current_user: UserInfo = Depends(get_current_user)) -> dict:
     return success(current_user.model_dump())
+
+
+# 做什么：返回当前登录用户的权限清单
+# 入参：由凭证确认的当前用户和请求级数据库会话
+# 返回：统一权限响应；未登录或账号停用由身份依赖拒绝
+@router.get("/me/permissions", summary="当前用户权限清单")
+def my_permissions_endpoint(
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db),
+) -> dict:
+    permission_codes = rbac_service.list_permission_codes(db_session, current_user.id)
+    return success({"permissions": permission_codes})
+
+
+# 做什么：接收本人改密请求，将凭证与密码交给服务核验保存
+# 入参：改密表单、Bearer token 和尚未开启事务的会话
+# 返回：统一成功响应；业务失败交给全局处理器返回对应错误
+@router.post("/change-password", summary="修改本人密码")
+def change_password_endpoint(
+    payload: ChangePasswordRequest,
+    token: str = Depends(get_access_token),
+    db_session: Session = Depends(get_db),
+) -> dict:
+    password_service.change_password(
+        db_session, token, payload.current_password, payload.new_password
+    )
+    return success(message="密码修改成功，请重新登录")
