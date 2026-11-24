@@ -68,4 +68,4 @@
 
 - 日期：2026-11-24。
 - 决定：阶段二按 [验收报告](验收/阶段二.md) 完成人工验收，结果留在报告里，不在本节重复写通过结论。
-- 原因：真实库补跑 `seed_rbac.py` 后 admin 角色为 4 个权限码，管理员退出重登后页面按钮与权限一致；测试账号 `fengxuan` 完成建号、普通账号登录、角色追加与撤销、停用全链路，库内 `status=disabled`、`token_version` 0→1 印证停用即时失效。`acceptance_stage2.py` 本次未执行，启用后重新登录与最后管理员保护由 `tests/test_rbac.py` 覆盖。
+- 原因：真实库补跑 `seed_rbac.py` 后 admin 角色为 4 个权限码，管理员退出重登后页面按钮与权限一致；测试账号 `fengxuan` 完成建号、普通账号登录、角色追加与撤销、停用全链路，库内 `status=disabled`、`token_version` 0→1 印证停用即时失效；当晚复测启用后重新登录成功，14 项全部人工确认。`acceptance_stage2.py` 本次未执行，最后管理员保护由 `tests/test_rbac.py` 覆盖。
