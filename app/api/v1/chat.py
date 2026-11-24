@@ -9,8 +9,8 @@ from app.api.deps import get_access_token
 from app.core.chat import CHAT_SSE_HEADERS
 from app.db import session as database_session
 from app.schemas.auth import UserInfo
-from app.schemas.chat import ChatPageQuery, ChatSendRequest
-from app.services import chat_history, chat_turns, chat_requests
+from app.schemas.chat import ChatPageQuery, ChatSendRequest, ChatSessionKnowledgeBaseUpdate
+from app.services import chat_history, chat_knowledge, chat_turns, chat_requests
 from app.services.chat_history import SessionFactory
 from app.services.chat_stream import stream_turn
 from app.services.chat_prewarm import PrewarmQueue
@@ -57,6 +57,20 @@ def create_session_endpoint(current_user: UserInfo = Depends(get_chat_user), ses
 def list_sessions_endpoint(pagination: ChatPageQuery = Query(), current_user: UserInfo = Depends(get_chat_user),
                             sessions=Depends(get_chat_sessions)) -> dict:
     return success(chat_history.list_sessions(sessions, current_user.id, pagination))
+
+
+# 做什么：为本人的空闲会话选择知识库或解除选择
+# 入参：会话编号、可为空的知识库编号、当前用户和会话工厂
+# 返回：统一响应中的会话公开字段；会话和库的校验失败走既有错误响应
+@router.put("/sessions/{session_id}/knowledge-base", summary="更新会话所选知识库")
+def set_session_knowledge_base_endpoint(
+    session_id: int, payload: ChatSessionKnowledgeBaseUpdate,
+    current_user: UserInfo = Depends(get_chat_user), sessions=Depends(get_chat_sessions),
+) -> dict:
+    chat_session = chat_knowledge.set_session_knowledge_base(
+        sessions, current_user.id, session_id, payload.knowledge_base_id
+    )
+    return success(chat_session.model_dump(mode="json"))
 
 
 # 做什么：分页读取本人指定会话的消息

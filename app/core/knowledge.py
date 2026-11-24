@@ -13,6 +13,7 @@ SEARCH_QUERY_MIN_CHARS = 2
 SEARCH_QUERY_MAX_CHARS = 200
 SEARCH_TOP_K_DEFAULT = 5
 SEARCH_TOP_K_MAX = 20
+RAG_TOP_K = 5
 
 
 # 新手注意：状态枚举像带编号的标签，数据库和接口都用编号，代码里用名称。

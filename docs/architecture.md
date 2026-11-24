@@ -38,11 +38,11 @@ fengxuanAgent/                        ✔ 已建 / □ 未建
 │  ├─ schemas/                        ✔ auth.py ✔ user.py ✔（创建用户、列表分页参数和公开响应）✔ rbac.py（角色绑定请求）✔ chat.py（会话、消息与请求计划）✔ knowledge.py（建库与上传请求、分页、公开字段）
 │  ├─ utils/                          ✔ response.py ✔（success 统一响应，准入：被两个以上模块使用）
 │  ├─ llm/                            ✔ client.py（流式 HTTP）+ prompts/chat.txt（系统提示词）
-│  ├─ rag/                            ✔ chunking.py（纯文本切分）/ retrieval.py（MySQL 全文检索）
+│  ├─ rag/                            ✔ chunking.py（纯文本切分）/ retrieval.py（MySQL 全文检索）/ context.py（当轮引用）
 │  └─ agents/                         □ 阶段四建：角色与编排
 ├─ tests/                             ✔ test_errors.py、test_security.py、test_create_admin.py、test_password.py、test_rbac.py、test_user_list.py（分页查询）、test_knowledge.py（知识库、文档和归属）
 ├─ scripts/                           ✔ create_admin.py ✔（造首个管理员）/ seed_rbac.py ✔（初始化角色与权限点）/ acceptance_stage2.py ✔（阶段二真实 HTTP 自检）
-└─ alembic/                           ✔ env.py 已接 Base 与配置；versions/ 迁移链 f71b1c2caccf → a743e8871d18 → b5f0c2d9e8a7 → 01619bd6e169 → 24c713a60f20 → 7e9204b6d815 → 9c4d16b8e2f1 → e1ea439850fc → f12630e761c9 → e433f3124db0（当前 head）
+└─ alembic/                           ✔ env.py 已接 Base 与配置；versions/ 迁移链 f71b1c2caccf → a743e8871d18 → b5f0c2d9e8a7 → 01619bd6e169 → 24c713a60f20 → 7e9204b6d815 → 9c4d16b8e2f1 → e1ea439850fc → f12630e761c9 → e433f3124db0 → af4cfc254421（当前 head）
 ```
 
 Python 包通过 `__init__.py` 声明包边界。`models/__init__.py` 还会导入表模型，供 Alembic 读取元数据。
@@ -137,5 +137,11 @@ tests/test_chat_partial_save.py 使用 tests/partial_save_worker.py 在专用子
 `rag/retrieval.py` 使用 MySQL ngram 自然语言全文检索，按相关性降序和切片编号升序返回至多 `top_k` 条。
 响应包含切片正文、章节路径、原文偏移和相关性得分。没有命中时返回空列表。
 
+`PUT /chat/sessions/{session_id}/knowledge-base` 由 `services/chat_knowledge.py` 为本人空闲会话选库。传 `null` 清除选择。
+选库编号随生成上下文带出行锁事务。已选库时在独立短会话中检索一次，超时或数据库异常时记录原因并继续生成。
+输入预算先扣除系统提示词、原问题和当轮资料，再选择历史。资料只进入当前 user 消息。
+入选资料通过 `references` 事件发送引用元数据，位于可选的 `context` 之后及首个 `delta` 之前。
+
 `e1ea439850fc` 创建 `knowledge_bases`。`f12630e761c9` 新增 `knowledge_documents` 和库内列表索引。
 `e433f3124db0` 新增 `knowledge_chunks`。MySQL 的 ngram 全文索引由迁移创建。
+`af4cfc254421` 为 `chat_sessions` 增加可空的知识库编号。

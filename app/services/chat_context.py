@@ -11,7 +11,7 @@ from app.schemas.chat import ContextCandidates, ContextMessage, ContextPlan, Pre
 from app.services.chat_history import SessionFactory
 from app.utils.cache import read_cache, write_cache
 from app.llm import client as model_client
-from app.llm.tokens import TOKEN_ESTIMATION_METHOD
+from app.llm.tokens import TOKEN_ESTIMATION_METHOD, estimate_text_tokens
 from app.services.chat_budget import plan_context
 
 logger = logging.getLogger(__name__)
@@ -112,11 +112,14 @@ def load_context(sessions: SessionFactory, turn: PreparedTurn) -> list[ContextMe
 
 
 # 做什么：每次请求根据系统提示词和当前问题重新计算最终历史
-# 入参：会话工厂和生成上下文
+# 入参：会话工厂、生成上下文和可选的当轮资料块
 # 返回：完整请求计划及统计，基本输入超限时抛安全异常
-def load_context_plan(sessions: SessionFactory, turn: PreparedTurn) -> ContextPlan:
+def load_context_plan(sessions: SessionFactory, turn: PreparedTurn, reference_block: str = "") -> ContextPlan:
     candidates = load_context_candidates(sessions, turn)
-    plan = plan_context(candidates, model_client.SYSTEM_PROMPT, turn.content)
+    plan = plan_context(candidates, model_client.SYSTEM_PROMPT, turn.content, reference_block)
+    if reference_block:
+        plan.reference_block = reference_block
+        plan.reference_bytes = estimate_text_tokens(reference_block)
     logger.info("上下文预算 | user_id=%s | session_id=%s | request_id=%s | model=%s | estimated_input_tokens=%s | "
                 "input_budget=%s | retained_rounds=%s | history_truncated=%s | latest_round_omitted=%s | estimation_method=%s",
                 turn.user_id, turn.session_id, turn.request_id, get_settings().llm_model, plan.estimated_input_tokens,

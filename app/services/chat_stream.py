@@ -13,6 +13,7 @@ from app.core.chat import CHAT_STREAM_HEARTBEAT_SECONDS, MessageStatus
 from app.core.chat_errors import MODEL_EVENT_CODES, ModelUnavailableError, ModelTimeoutError, ModelProtocolError
 from app.core.config import get_settings
 from app.llm.client import ModelChunk, SUPPORTED_FINISH_REASONS, stream_model
+from app.rag.context import ReferenceBundle, collect_references, compose_question
 from app.schemas.chat import PreparedTurn, TurnResult
 from app.services.chat_context import load_context_plan
 from app.services.chat_budget import context_notice
@@ -167,14 +168,20 @@ async def timed_events(sessions: SessionFactory, turn: PreparedTurn, result: Tur
             yield event
 
 
-# 做什么：为模型迭代器和心跳迭代器安排显式资源清理
-# 入参：会话工厂、生成请求、历史和可变结果
+# 做什么：在打开模型前准备资料和历史，并显式清理两层迭代器
+# 入参：会话工厂、生成请求和可变结果
 # 返回：模型事件流，提前关闭也会清理上游请求
 async def model_events(sessions: SessionFactory, turn: PreparedTurn, result: TurnResult) -> AsyncIterator[str]:
-    plan = await run_in_threadpool(load_context_plan, sessions, turn)
+    bundle = ReferenceBundle(reason="no_selection")
+    if turn.knowledge_base_id is not None:
+        bundle = await collect_references(sessions, turn.user_id, turn.knowledge_base_id, turn.content)
+    log_references(turn, bundle)
+    plan = await run_in_threadpool(load_context_plan, sessions, turn, bundle.block)
     if plan.history_truncated:
         yield encode_event("context", context_notice(plan))
-    iterator = stream_model(plan.messages, turn.content)
+    if bundle.items:
+        yield encode_event("references", {"items": bundle.items})
+    iterator = stream_model(plan.messages, compose_question(bundle.block, turn.content))
     events = pump_chunks(sessions, turn, iterator, result)
     try:
         async for event in events:
@@ -184,6 +191,21 @@ async def model_events(sessions: SessionFactory, turn: PreparedTurn, result: Tur
             await close_stream(events, turn, "chunk_events")
         finally:
             await close_stream(iterator, turn, "model_stream")
+
+
+# 做什么：记录单轮检索的统计与降级原因，不记录问题或资料
+# 入参：生成请求和引用结果
+# 返回：无；超时和数据库异常用警告级别记录
+def log_references(turn: PreparedTurn, bundle: ReferenceBundle) -> None:
+    degraded = bundle.reason in ("timeout", "db_error")
+    log_level = logging.WARNING if degraded else logging.INFO
+    block_bytes = len(bundle.block.encode("utf-8"))
+    logger.log(
+        log_level, "知识库检索 | session_id=%s | knowledge_base_id=%s | hit_count=%s | kept_count=%s | "
+        "block_bytes=%s | elapsed_ms=%.1f | degraded=%s | reason=%s",
+        turn.session_id, turn.knowledge_base_id, bundle.hit_count, len(bundle.items),
+        block_bytes, bundle.elapsed_ms, degraded, bundle.reason,
+    )
 
 
 # 做什么：独立关闭一个流资源，清理失败只记录安全信息，不阻断其他收尾

@@ -1,5 +1,6 @@
 """按完整请求预算选择最近连续的完整轮次，不调用模型做摘要。"""
 from app.llm.tokens import effective_input_budget, ensure_request_budget, estimate_message_tokens, estimate_request_tokens
+from app.rag.context import compose_question
 from app.schemas.chat import ContextCandidates, ContextMessage, ContextPlan
 
 
@@ -23,9 +24,12 @@ def select_history(messages: list[ContextMessage], remaining_tokens: int) -> lis
 
 
 # 做什么：生成包含裁剪标记的请求计划，完整保留系统提示词和当前问题
-# 入参：有界历史候选、系统提示词及当前问题
+# 入参：有界历史候选、系统提示词、当前问题及可选资料块
 # 返回：最终历史及预算统计；基本输入不适配时抛安全异常
-def plan_context(candidates: ContextCandidates, system_prompt: str, question: str) -> ContextPlan:
+def plan_context(
+    candidates: ContextCandidates, system_prompt: str, question: str, reference_block: str = ""
+) -> ContextPlan:
+    question = compose_question(reference_block, question)
     base_tokens = ensure_request_budget(system_prompt, [], question)
     input_budget = effective_input_budget()
     messages = select_history(candidates.messages, input_budget - base_tokens)

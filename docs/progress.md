@@ -105,3 +105,7 @@
 - 日期：2026-11-24。
 - 决定：阶段三加入 `POST /knowledge-bases/{id}/search`；`app/rag/retrieval.py` 用 MySQL ngram 自然语言模式检索本人未删除切片，按相关性降序、编号升序返回至多 `top_k`（1~20）条，不返回 total。单字查询由接口层拒绝，不交给全文索引。
 - 原因：MATCH 必须走自然语言模式，`ColumnElement.match()` 固定生成 `IN BOOLEAN MODE`，故改用 `text()` 片段绑定参数。开发库实测 `EXPLAIN` 的 `type=fulltext`；ngram 二元切会把只共享一个二元组的噪声块召回（"会话锁"命中含"会话列表"的块，得分 0.54 对 2.17），本轮不加分数阈值，留到接对话时按 `top_k` 与预算处理。全量回归 261 项通过（原 248 项 + 新增 13 项）。
+
+- 日期：2026-11-24。
+- 决定：阶段三接入对话。会话级手选库（`chat_sessions.knowledge_base_id` + `PUT /chat/sessions/{id}/knowledge-base`）；提问时在 `model_events` 做一次检索（800ms 超时、失败降级为空引用），资料块只拼进当前 user 消息，SSE 新增 `references` 事件；预算顺序为系统提示词与当前问题 → 资料（上限 8000 字节）→ 剩余给历史。
+- 原因：资料不进 system 是为保住前缀缓存并避免资料内文字被当成系统指令；检索放旁路，超时或数据库异常不许拖垮对话。全量回归 276 项通过（原 261 项 + 新增 15 项），迁移 `af4cfc254421` 在真实库升级、回退、再升级均通过，开发库实测检索 15ms、命中 1 条、资料块 567 字节。注意：前端 `chatStream.ts` 的 `validatedEvent` 对未知事件直接抛错，`references` 需前端同步补分支，否则选库后对话会在前端报协议错误。

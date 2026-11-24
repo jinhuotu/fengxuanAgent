@@ -22,6 +22,9 @@ class ChatSession(Base):
     )
     id: Mapped[int] = mapped_column(IDENTIFIER_TYPE, primary_key=True, autoincrement=True, comment="会话编号，自增")
     user_id: Mapped[int] = mapped_column(BigInteger, comment="所属用户编号，由服务校验，不建物理外键")
+    knowledge_base_id: Mapped[int | None] = mapped_column(
+        BigInteger, comment="所选知识库编号，为空表示本次会话不使用知识库"
+    )
     title: Mapped[str] = mapped_column(String(CHAT_TITLE_LENGTH), default="新对话", comment="会话标题，首次提问后截取问题生成")
     history_version: Mapped[int] = mapped_column(Integer, default=0, comment="历史版本号，隔离不同版本的上下文缓存")
     active_request_id: Mapped[str | None] = mapped_column(String(36), default=None, comment="正在生成的请求编号，空表示未占用")

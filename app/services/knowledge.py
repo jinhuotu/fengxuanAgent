@@ -98,6 +98,13 @@ def _require_owned_knowledge_base(db_session: Session, owner_id: int, knowledge_
         raise KnowledgeBaseNotFoundError()
 
 
+# 做什么：向其他服务提供本人知识库的可见性校验
+# 入参：数据库会话、当前用户编号和知识库编号
+# 返回：无；知识库不可见时抛 KnowledgeBaseNotFoundError
+def require_owned_knowledge_base(db_session: Session, owner_id: int, knowledge_base_id: int) -> None:
+    _require_owned_knowledge_base(db_session, owner_id, knowledge_base_id)
+
+
 # 做什么：校验归属，在同一事务保存原文与切片并标记文档就绪
 # 入参：独立写入会话、当前用户编号、知识库编号和已校验表单
 # 返回：文档的公开字段；校验或写入失败时回滚并抛出异常

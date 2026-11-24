@@ -62,7 +62,8 @@ def prepare_turn(sessions: SessionFactory, user_id: int, session_id: int, reques
         ensure_generation_capacity(db_session)
         assistant = insert_turn(db_session, chat_session, request_id, content)
         return PreparedTurn(user_id=user_id, session_id=session_id, request_id=request_id,
-                            assistant_id=assistant.id, history_version=chat_session.history_version, content=content)
+                            assistant_id=assistant.id, history_version=chat_session.history_version, content=content,
+                            knowledge_base_id=chat_session.knowledge_base_id)
 
 
 # 做什么：只允许当前请求保存最终结果，防止旧请求覆盖新请求

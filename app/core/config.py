@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     llm_context_window_tokens: int = Field(default=32768, gt=0)
     chat_input_token_budget: int = Field(default=24000, gt=0)
     chat_context_safety_tokens: int = Field(default=512, ge=0)
+    chat_rag_token_budget: int = Field(default=8000, ge=0)
+    chat_rag_timeout_ms: int = Field(default=800, gt=0)
     chat_prewarm_enabled: bool = True
     chat_prewarm_queue_capacity: int = Field(default=20, ge=1, le=1000)
     chat_prewarm_workers: int = Field(default=2, ge=1, le=8)

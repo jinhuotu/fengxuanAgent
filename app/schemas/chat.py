@@ -20,6 +20,10 @@ class ChatSendRequest(BaseModel):
     retry_of_request_id: UUID | None = None
 
 
+class ChatSessionKnowledgeBaseUpdate(BaseModel):
+    knowledge_base_id: int | None
+
+
 class ChatSessionItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -29,6 +33,7 @@ class ChatSessionItem(BaseModel):
     history_version: int
     active_request_id: str | None
     generation_expires_at: datetime | None
+    knowledge_base_id: int | None = None
 
 
 class ChatMessageItem(BaseModel):
@@ -50,6 +55,7 @@ class PreparedTurn(BaseModel):
     assistant_id: int
     history_version: int
     content: str
+    knowledge_base_id: int | None = None
 
 
 class ChatRequestResult(BaseModel):
@@ -81,6 +87,8 @@ class ContextPlan(BaseModel):
     latest_round_omitted: bool
     estimated_input_tokens: int
     input_token_budget: int
+    reference_block: str = ""
+    reference_bytes: int = 0
 
 
 class TurnResult(BaseModel):
