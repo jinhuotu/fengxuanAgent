@@ -1,9 +1,10 @@
 """个人知识库的请求、公开字段及分页结果。"""
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from app.core.knowledge import DOCUMENT_CONTENT_LENGTH, DOCUMENT_TITLE_LENGTH, DocumentStatus
 from app.schemas.user import DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE
 
 MAX_KNOWLEDGE_BASE_NAME_LENGTH = 50
@@ -34,12 +35,36 @@ class KnowledgeBaseItem(BaseModel):
     id: int
     name: str
     description: str | None
-    document_count: Literal[0] = 0
+    document_count: int = 0
     created_at: datetime
 
 
 class KnowledgeBaseListResponse(BaseModel):
     items: list[KnowledgeBaseItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class KnowledgeDocumentCreate(BaseModel):
+    title: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=DOCUMENT_TITLE_LENGTH)
+    ] = Field(description="文档标题")
+    content: str = Field(min_length=1, max_length=DOCUMENT_CONTENT_LENGTH, description="纯文本原文")
+
+
+class KnowledgeDocumentItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    char_count: int
+    status: DocumentStatus
+    created_at: datetime
+
+
+class KnowledgeDocumentListResponse(BaseModel):
+    items: list[KnowledgeDocumentItem]
     total: int
     page: int
     page_size: int

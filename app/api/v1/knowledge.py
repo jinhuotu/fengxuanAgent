@@ -1,11 +1,11 @@
-"""登录用户的建库与本库列表接口。"""
+"""登录用户的知识库与文档接口。"""
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.schemas.auth import UserInfo
-from app.schemas.knowledge import KnowledgeBaseCreate, KnowledgeBaseListQuery
+from app.schemas.knowledge import KnowledgeBaseCreate, KnowledgeBaseListQuery, KnowledgeDocumentCreate
 from app.services import knowledge as knowledge_service
 from app.utils.response import success
 
@@ -37,3 +37,35 @@ def list_knowledge_bases(
 ) -> dict:
     knowledge_bases = knowledge_service.list_knowledge_bases(db_session, current_user.id, query)
     return success(knowledge_bases.model_dump(mode="json"))
+
+
+# 做什么：接收纯文本文档并返回创建结果
+# 入参：知识库编号、已校验的请求体、当前用户和独立写入会话
+# 返回：统一响应；未登录、库不可见或参数错误时返回对应错误
+@router.post("/{knowledge_base_id}/documents", summary="上传纯文本文档")
+def create_knowledge_document(
+    knowledge_base_id: int,
+    payload: KnowledgeDocumentCreate,
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db, use_cache=False),
+) -> dict:
+    document = knowledge_service.create_knowledge_document(
+        db_session, current_user.id, knowledge_base_id, payload
+    )
+    return success(document.model_dump(mode="json"))
+
+
+# 做什么：接收分页参数并返回指定知识库的文档列表
+# 入参：知识库编号、已校验的分页参数、当前用户和请求级数据库会话
+# 返回：统一分页响应；未登录、库不可见或参数错误时返回对应错误
+@router.get("/{knowledge_base_id}/documents", summary="知识库文档列表")
+def list_knowledge_documents(
+    knowledge_base_id: int,
+    query: KnowledgeBaseListQuery = Depends(),
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db),
+) -> dict:
+    documents = knowledge_service.list_knowledge_documents(
+        db_session, current_user.id, knowledge_base_id, query
+    )
+    return success(documents.model_dump(mode="json"))

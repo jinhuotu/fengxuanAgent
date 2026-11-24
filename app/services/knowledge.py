@@ -1,13 +1,18 @@
-"""个人知识库的创建与分页查询。"""
+"""个人知识库与文档的创建、分页查询。"""
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.models.knowledge import IS_NOT_DELETED, KnowledgeBase
+from app.core.errors import KnowledgeBaseNotFoundError
+from app.core.knowledge import DocumentStatus
+from app.models.knowledge import IS_NOT_DELETED, KnowledgeBase, KnowledgeDocument
 from app.schemas.knowledge import (
     KnowledgeBaseCreate,
     KnowledgeBaseItem,
     KnowledgeBaseListQuery,
     KnowledgeBaseListResponse,
+    KnowledgeDocumentCreate,
+    KnowledgeDocumentItem,
+    KnowledgeDocumentListResponse,
 )
 
 
@@ -48,6 +53,93 @@ def list_knowledge_bases(
         item_query = item_query.order_by(KnowledgeBase.id.desc()).offset(offset_count)
         item_rows = db_session.execute(item_query.limit(query.page_size)).mappings().all()
         knowledge_base_items = [KnowledgeBaseItem.model_validate(item_row) for item_row in item_rows]
+        knowledge_base_ids = [knowledge_base.id for knowledge_base in knowledge_base_items]
+        counts_by_base = _count_documents_by_base(db_session, owner_id, knowledge_base_ids)
+        for knowledge_base in knowledge_base_items:
+            knowledge_base.document_count = counts_by_base.get(knowledge_base.id, 0)
     return KnowledgeBaseListResponse(
         items=knowledge_base_items, total=total, page=query.page, page_size=query.page_size
+    )
+
+
+# 做什么：一次统计当前页各库的未删除文档数
+# 入参：数据库会话、当前用户编号和当前页的知识库编号
+# 返回：库编号到文档数的映射；空页返回空字典，数据库异常直接抛出
+def _count_documents_by_base(
+    db_session: Session, owner_id: int, knowledge_base_ids: list[int]
+) -> dict[int, int]:
+    if not knowledge_base_ids:
+        return {}
+    # 新手注意：GROUP BY 像把票据按库放进盒子，每盒只报一个总数。
+    count_query = select(KnowledgeDocument.knowledge_base_id, func.count()).where(
+        KnowledgeDocument.knowledge_base_id.in_(knowledge_base_ids),
+        KnowledgeDocument.owner_id == owner_id,
+        KnowledgeDocument.is_deleted == IS_NOT_DELETED,
+    ).group_by(KnowledgeDocument.knowledge_base_id)
+    count_rows = db_session.execute(count_query).all()
+    return {base_id: document_count for base_id, document_count in count_rows}
+
+
+# 做什么：确认指定知识库存在、未删除且属于当前用户
+# 入参：数据库会话、当前用户编号和路径中的知识库编号
+# 返回：无；归属校验失败时抛 KnowledgeBaseNotFoundError
+def _require_owned_knowledge_base(db_session: Session, owner_id: int, knowledge_base_id: int) -> None:
+    base_query = select(KnowledgeBase.id).where(
+        KnowledgeBase.id == knowledge_base_id,
+        KnowledgeBase.owner_id == owner_id,
+        KnowledgeBase.is_deleted == IS_NOT_DELETED,
+    )
+    if db_session.scalar(base_query) is None:
+        raise KnowledgeBaseNotFoundError()
+
+
+# 做什么：校验归属后保存原文，并标记文档待切分
+# 入参：独立写入会话、当前用户编号、知识库编号和已校验表单
+# 返回：文档的公开字段；校验或写入失败时回滚并抛出异常
+def create_knowledge_document(
+    db_session: Session, owner_id: int, knowledge_base_id: int, payload: KnowledgeDocumentCreate
+) -> KnowledgeDocumentItem:
+    with db_session.begin():
+        _require_owned_knowledge_base(db_session, owner_id, knowledge_base_id)
+        document = KnowledgeDocument(
+            knowledge_base_id=knowledge_base_id,
+            owner_id=owner_id,
+            title=payload.title,
+            raw_content=payload.content,
+            char_count=len(payload.content),
+            status=DocumentStatus.PENDING,
+        )
+        db_session.add(document)
+        db_session.flush()
+        document_item = KnowledgeDocumentItem.model_validate(document)
+    return document_item
+
+
+# 做什么：校验归属后按编号倒序分页读取该库文档的公开字段
+# 入参：请求级会话、当前用户编号、知识库编号和已校验的分页参数
+# 返回：文档条目、总数和分页信息；校验或查询失败时抛出异常
+def list_knowledge_documents(
+    db_session: Session, owner_id: int, knowledge_base_id: int, query: KnowledgeBaseListQuery
+) -> KnowledgeDocumentListResponse:
+    _require_owned_knowledge_base(db_session, owner_id, knowledge_base_id)
+    document_filter = and_(
+        KnowledgeDocument.knowledge_base_id == knowledge_base_id,
+        KnowledgeDocument.owner_id == owner_id,
+        KnowledgeDocument.is_deleted == IS_NOT_DELETED,
+    )
+    count_query = select(func.count()).select_from(KnowledgeDocument).where(document_filter)
+    total = db_session.execute(count_query).scalar_one()
+    offset_count = (query.page - 1) * query.page_size
+    document_items: list[KnowledgeDocumentItem] = []
+    # 空页只需要总数，跳过明细查询。
+    if offset_count < total:
+        item_query = select(
+            KnowledgeDocument.id, KnowledgeDocument.title, KnowledgeDocument.char_count,
+            KnowledgeDocument.status, KnowledgeDocument.created_at,
+        ).where(document_filter)
+        item_query = item_query.order_by(KnowledgeDocument.id.desc()).offset(offset_count)
+        item_rows = db_session.execute(item_query.limit(query.page_size)).mappings().all()
+        document_items = [KnowledgeDocumentItem.model_validate(item_row) for item_row in item_rows]
+    return KnowledgeDocumentListResponse(
+        items=document_items, total=total, page=query.page, page_size=query.page_size
     )

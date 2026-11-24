@@ -12,7 +12,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-# 错误码规则：1000-1999 认证类；2000-2999 权限类；3000-3999 对话类；5000 起是系统级。
+# 错误码规则：1000-1999 认证类；2000-2999 权限类；3000-3999 对话类。
+# 4000-4999 知识库类；5000 起是系统级。
 # 前端靠 code 判断具体原因，靠 HTTP 状态码判断大类，两者都要对，不能一律返回 200。
 CODE_INVALID_PARAMS = 1000
 CODE_INVALID_CREDENTIALS = 1001
@@ -26,6 +27,7 @@ CODE_PERMISSION_DENIED = 2001
 CODE_ROLE_NOT_FOUND = 2002
 CODE_CANNOT_MODIFY_SELF = 2003
 CODE_LAST_ADMIN_PROTECTED = 2004
+CODE_KNOWLEDGE_BASE_NOT_FOUND = 4001
 CODE_INTERNAL_ERROR = 5000
 
 DEFAULT_HTTP_STATUS = 400
@@ -160,6 +162,15 @@ class LastAdminProtectedError(BusinessError):
     code = CODE_LAST_ADMIN_PROTECTED
     http_status = 409
     message = "系统至少保留一名管理员"
+
+
+# 做什么：统一处理不存在、已删除或不属于当前用户的知识库
+# 入参：无，使用公开错误文案
+# 返回：抛出后由全局处理器转成 404/4001
+class KnowledgeBaseNotFoundError(BusinessError):
+    code = CODE_KNOWLEDGE_BASE_NOT_FOUND
+    http_status = 404
+    message = "知识库不存在"
 
 
 # 做什么：把上面这些异常接住，转成统一响应结构
