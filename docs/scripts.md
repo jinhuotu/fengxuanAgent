@@ -57,6 +57,15 @@ uv run python scripts/seed_rbac.py
 - 执行方式：在仓库根目录运行 `uv run --no-sync python scripts/acceptance_stage2.py --username admin`。
 - 注意：在真实终端用 `getpass` 输入 A 和两个验收账号的密码。新建验收账号时输入新密码并自行保存，复用时输入原密码。使用专用的 `accept_b`、`accept_c`，脚本会实际改变其角色和状态。脚本通过 API 操作，缺路由或权限时停止。 [报告模板](验收/阶段二.md)
 
+### scripts/acceptance_stage3.py
+
+- 用途：通过真实 HTTP 自检阶段三个人知识库链路：建库、上传纯文本、切片偏移与覆盖、引用详情、探针检索、无关问题零命中、删文档、删库与会话清库。
+- 参数：`--username` 必填；`--password` 可选，不填则交互输入；`--base-url` 默认 `http://127.0.0.1:8081`；`--keep` 保留临时知识库供页面手验。
+- 前置条件：8081 已运行当前后端并连接项目 MySQL，迁移为 `af4cfc254421`，`knowledge_chunks` 已有 ngram 全文索引。健康检查或登录失败时退出 `2`。
+- 可否重复执行：可以。每次用带时间戳的临时库名，结束时删除；中途失败也会在收尾阶段删除（`--keep` 除外）。
+- 执行方式：`uv run --no-sync python scripts/acceptance_stage3.py --username admin`。
+- 注意：脚本不调用模型，因此不覆盖对话引用与原文抽屉的页面表现，那两项按报告里的「页面点击清单」人工核对。 [报告模板](验收/阶段三.md)
+
 ### scripts/corpus_import.py
 
 - 用途：把指定目录中的 UTF-8 `.txt` 和 `.md` 批量上传为知识库文档。
