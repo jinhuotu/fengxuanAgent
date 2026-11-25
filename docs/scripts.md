@@ -124,6 +124,21 @@ uv run python scripts/seed_rbac.py
 - 注意：[容易踩的坑，没有就写"无"]
 ```
 
+
+### scripts/rebuild_vector_index.py
+
+- 用途：删除并重建 Qdrant 向量集合，把数据库中有效切片重新向量化，用于首次建索引、换模型或修复同步失败。
+- 参数：无
+- 前置条件：`fengxuan-qdrant` 容器已启动；`.env` 中 `VECTOR_ENABLED=true`；`EMBEDDING_DIM` 与新模型一致。
+- 可否重复执行：可以。每次都会删除旧集合，跑完以数据库为准重建。
+- 执行方式（在项目根目录）：
+
+```powershell
+uv run python scripts/rebuild_vector_index.py
+```
+
+- 注意：首次运行会下载模型，国内默认走 `EMBEDDING_HF_ENDPOINT` 镜像；集合名由 `QDRANT_COLLECTION` 决定，不要和别的项目共用容器。
+
 ## 五、每轮交付时的脚本清点
 
 交付时固定报三行，让"有没有留下垃圾"这件事可见：

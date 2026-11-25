@@ -39,8 +39,18 @@
 | CHAT_PREWARM_QUEUE_CAPACITY | 20，每进程待执行容量，不含正在执行的任务 |
 | CHAT_PREWARM_WORKERS | 2，每进程后台工作任务数，范围 1–8 |
 | CHAT_PREWARM_SHUTDOWN_SECONDS | 1，关闭时等待执行中预热的期限，范围 0.01–30 秒 |
+| VECTOR_ENABLED | false，默认关闭；关闭时只用关键词检索，不加载模型也不连 Qdrant |
+| VECTOR_RETRIEVAL_MODE | keyword，可选 vector 或 hybrid；仅 VECTOR_ENABLED=true 时生效 |
+| QDRANT_URL | http://127.0.0.1:6335，本机 fengxuan-qdrant 容器 |
+| QDRANT_COLLECTION | fengxuan_chunks，向量集合名 |
+| EMBEDDING_MODEL | BAAI/bge-small-zh-v1.5，本地 ONNX 中文向量模型 |
+| EMBEDDING_DIM | 512，必须与模型输出一致；换模型要同时重建索引 |
+| EMBEDDING_CACHE_DIR | .cache/fastembed，模型缓存，已 git 忽略 |
+| EMBEDDING_HF_ENDPOINT | https://hf-mirror.com，仅供首次下载模型使用 |
+| VECTOR_MIN_SCORE_RATIO | 0.5，向量候选低于本次最高相似度一半时丢弃 |
 
 首次部署先同步已获批准的依赖，再执行新增迁移。`24c713a60f20` 增加两张对话表；`7e9204b6d815` 增加 `chat_generation_gates` 固定准入锁记录，以及 `chat_sessions` 的有效占用索引，不修改已有消息。已部署旧对话版本时也须先升级到新迁移，再启动新代码。
+启用向量检索时额外启动 `fengxuan-qdrant` 容器（本机映射 6335/6336），并执行一次 `scripts/rebuild_vector_index.py` 建集合；模型首次使用会下载到 `EMBEDDING_CACHE_DIR`，离线环境需提前准备缓存。
 以下命令也已登记在 `docs/commands.md`，应在后端根目录执行：
 
 ```powershell

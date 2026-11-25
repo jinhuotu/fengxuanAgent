@@ -197,3 +197,7 @@
 - 日期：2026-11-25。
 - 决定：对话页补上删除会话与一键清空：单删、清空都走软删，不提供恢复；生成中的会话单删返回 409/3002，清空时只要一条在生成就整批拒绝，不做部分删除。
 - 说明：`ChatSession`/`ChatMessage` 原本就有 `is_deleted` 软删字段和对应索引，本刀无迁移。`chat_history.py` 新增 `delete_session`/`clear_sessions`/`mark_messages_deleted`/`soft_delete_session`：先锁会话再恢复过期占用，仍在生成则拒绝；成功时清空 `active_request_id`、`generation_expires_at`，`history_version` 加一，使旧 Redis 候选缓存键失效。接口新增 `DELETE /chat/sessions/{id}` 与 `DELETE /chat/sessions`，响应 `{session_id, deleted_messages}` / `{deleted_sessions, deleted_messages}`。测试新增 `tests/test_chat_delete.py` 七条与 `test_chat_api.py` 接口用例一条（鉴权、200、409、清空计数）；全量回归 372 项通过。
+
+- 日期：2026-11-25。
+- 决定：先做向量库、后做文件上传。向量库采用本机 `fengxuan-qdrant` 容器（镜像 v1.13.4，映射 6335/6336）+ 本地 ONNX `BAAI/bge-small-zh-v1.5`（512 维），检索支持 keyword/vector/hybrid 三种模式，默认 hybrid。
+- 说明：新增 `app/rag/vector_index.py`（集合创建、payload 索引、切片向量化、按文档/库删除、按用户+库过滤检索）与 `scripts/rebuild_vector_index.py`；上传提交后同步、删除后清点，同步失败只记日志；检索结果按切片编号回库校验归属和软删状态，陈旧点不会进入回答。`retrieval.py` 保留原关键词路径，hybrid 把两路分数按各自 top1 归一化后相加；前端和接口形状未变。依赖新增 `fastembed`、`qdrant-client<1.15`（对齐服务端版本）。库内 120 个切片已重建；五题实测 top1 与关键词基线逐题一致，p50 60–92ms（首次含模型加载 216ms）；上传→检索→删除文档全链路实测命中和点数量同步归零。全量回归 378 项通过，本刀无迁移。

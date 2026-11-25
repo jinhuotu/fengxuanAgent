@@ -12,7 +12,7 @@ from app.core.knowledge import (
 from app.core.logging import get_logger
 from app.models.chat import ChatSession
 from app.models.knowledge import IS_NOT_DELETED, KnowledgeBase, KnowledgeChunk, KnowledgeDocument
-from app.rag import retrieval
+from app.rag import retrieval, vector_index
 from app.rag.chunking import ChunkDraft, split_document
 from app.rag.index_maintenance import MYSQL_DIALECT, rebuild_fulltext_index
 from app.schemas.knowledge import (
@@ -201,6 +201,7 @@ def delete_knowledge_base(db_session: Session, owner_id: int, knowledge_base_id:
             id=knowledge_base_id, deleted_documents=deleted_documents,
             deleted_chunks=deleted_chunks, cleared_sessions=cleared_sessions,
         )
+    _delete_vector_index_vectors(knowledge_base_id=knowledge_base_id)
     _verify_search_index_after_delete(db_session, owner_id, knowledge_base_id)
     return result
 
@@ -220,6 +221,7 @@ def delete_knowledge_document(
             _owned_chunks_filter(owner_id, knowledge_base_id), KnowledgeChunk.document_id == document_id,
         ).values(is_deleted=SOFT_DELETED)
         result = KnowledgeDocumentDeleteResult(id=document_id, deleted_chunks=db_session.execute(chunk_update).rowcount)
+    _delete_vector_index_vectors(document_id=document_id)
     _verify_search_index_after_delete(db_session, owner_id, knowledge_base_id)
     return result
 
@@ -290,6 +292,7 @@ def create_knowledge_document(
         chunks = _save_document_chunks(db_session, document)
         document.status = DocumentStatus.READY
         document_item = KnowledgeDocumentItem.model_validate(document)
+    _sync_vector_index_after_upload(db_session, owner_id, knowledge_base_id, document_item.id)
     _verify_search_index_after_upload(db_session, owner_id, knowledge_base_id, chunks)
     return document_item
 
@@ -320,6 +323,41 @@ def _save_document_chunks(db_session: Session, document: KnowledgeDocument) -> l
     db_session.add_all(chunks)
     db_session.flush()
     return chunk_drafts
+
+
+# 做什么：上传提交后把新切片写入向量集合，失败只记日志
+# 入参：已提交的会话、用户编号、库编号和文档编号
+# 返回：无；数据库仍是事实来源，索引可由重建脚本补齐
+def _sync_vector_index_after_upload(
+    db_session: Session, owner_id: int, knowledge_base_id: int, document_id: int,
+) -> None:
+    if not vector_index.is_enabled():
+        return
+    try:
+        written = vector_index.sync_document(db_session, knowledge_base_id, owner_id, document_id)
+        logger.info("向量索引同步 | owner_id=%s | knowledge_base_id=%s | document_id=%s | points=%s",
+                    owner_id, knowledge_base_id, document_id, written)
+    except Exception as error:
+        logger.warning("向量索引同步失败 | owner_id=%s | knowledge_base_id=%s | document_id=%s | error_type=%s | 需重建补齐",
+                       owner_id, knowledge_base_id, document_id, type(error).__name__)
+
+
+# 做什么：删除提交后移除对应向量点，陈旧点也会在检索时被回库校验挡掉
+# 入参：文档编号或知识库编号，二选一
+# 返回：无；失败只记日志
+def _delete_vector_index_vectors(*, document_id: int | None = None, knowledge_base_id: int | None = None) -> None:
+    if not vector_index.is_enabled() or (document_id is None and knowledge_base_id is None):
+        return
+    try:
+        if document_id is not None:
+            vector_index.delete_document(document_id)
+            logger.info("向量索引删除 | document_id=%s", document_id)
+        else:
+            vector_index.delete_knowledge_base(knowledge_base_id or 0)
+            logger.info("向量索引删除 | knowledge_base_id=%s", knowledge_base_id)
+    except Exception as error:
+        logger.warning("向量索引删除失败 | document_id=%s | knowledge_base_id=%s | error_type=%s",
+                       document_id, knowledge_base_id, type(error).__name__)
 
 
 # 做什么：执行一次上传探针，并结束本次读取事务

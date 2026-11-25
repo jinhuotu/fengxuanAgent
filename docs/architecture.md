@@ -134,8 +134,12 @@ tests/test_chat_partial_save.py 使用 tests/partial_save_worker.py 在专用子
 两个接口都复用登录校验，并按知识库编号、归属和软删除标志检查可见性。不可见时统一返回 `404/4001`。
 
 `POST /knowledge-bases/{knowledge_base_id}/search` 先检查知识库归属，再检索该库内本人未删除的切片。
-`rag/retrieval.py` 使用 MySQL ngram 自然语言全文检索，按相关性降序和切片编号升序返回至多 `top_k` 条。
-响应包含切片正文、章节路径、原文偏移和相关性得分。没有命中时返回空列表。
+`rag/retrieval.py` 支持三种模式，由 `VECTOR_ENABLED` 和 `VECTOR_RETRIEVAL_MODE` 决定：`keyword` 仍走 MySQL ngram 全文检索加探针过滤；`vector` 走 Qdrant 余弦相似度并按 `0.5 × top1` 截断；`hybrid` 把两路分数各自按本路 top1 归一化后相加，再按 `SEARCH_MIN_SCORE_RATIO` 截断。默认关闭向量时行为与旧版完全一致。
+响应包含切片正文、章节路径、原文偏移和相关性得分。向量或混合模式返回的 `score` 是融合分，不与 BM25 分数直接可比；没有命中时返回空列表。
+
+`rag/vector_index.py` 负责切片向量化与 Qdrant 读写：集合按 `EMBEDDING_DIM` 创建，payload 存 `owner_id`、`knowledge_base_id`、`document_id`、`chunk_id`，检索时按用户和库过滤。向量模型用本地 ONNX 的 `BAAI/bge-small-zh-v1.5`，查询走模型自带指令，首次使用从 `EMBEDDING_HF_ENDPOINT` 下载到 `EMBEDDING_CACHE_DIR`。
+上传事务提交后按文档同步向量；删除文档或删库后按编号删除向量点。同步失败只记日志、不影响已经提交的数据库写入；检索时用切片编号回库校验归属和软删状态，索引里多出来的陈旧点不会进入回答。
+`scripts/rebuild_vector_index.py` 删除并重建整个集合，用于换模型、改维度或修复同步失败。
 
 `PUT /chat/sessions/{session_id}/knowledge-base` 由 `services/chat_knowledge.py` 为本人空闲会话选库。传 `null` 清除选择。
 选库编号随生成上下文带出行锁事务。已选库时在独立短会话中检索一次，超时或数据库异常时记录原因并继续生成。

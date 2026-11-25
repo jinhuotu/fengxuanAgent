@@ -98,6 +98,23 @@ class Settings(BaseSettings):
     search_candidate_multiplier: int = Field(default=3, ge=1)
     # SEARCH_CANDIDATE_MAX：限制单次读取量，给对话检索的时限预留余量。
     search_candidate_max: int = Field(default=40, ge=1, le=100)
+    # 向量检索默认关闭：没有 Qdrant 或模型缓存的环境按关键词检索照常启动。
+    vector_enabled: bool = False
+    # keyword 保留原路径；vector 只走向量；hybrid 合并两路候选。
+    vector_retrieval_mode: Literal["keyword", "vector", "hybrid"] = "keyword"
+    qdrant_url: str = "http://127.0.0.1:6335"
+    qdrant_api_key: SecretStr = SecretStr("")
+    qdrant_collection: str = "fengxuan_chunks"
+    qdrant_timeout_seconds: float = Field(default=3, gt=0)
+    embedding_model: str = "BAAI/bge-small-zh-v1.5"
+    # bge-small-zh-v1.5 输出 512 维；换模型必须同步改这里并重建索引。
+    embedding_dim: int = Field(default=512, ge=1)
+    embedding_cache_dir: str = ".cache/fastembed"
+    embedding_batch_size: int = Field(default=16, ge=1, le=128)
+    # 国内默认走镜像下载模型；模型已缓存时该值不参与请求。
+    embedding_hf_endpoint: str = "https://hf-mirror.com"
+    # 向量候选的相对下限：低于本次最高相似度一半的候选不进入结果。
+    vector_min_score_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
     chat_prewarm_enabled: bool = True
     chat_prewarm_queue_capacity: int = Field(default=20, ge=1, le=1000)
     chat_prewarm_workers: int = Field(default=2, ge=1, le=8)

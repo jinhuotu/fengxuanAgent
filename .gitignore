@@ -24,3 +24,6 @@ Thumbs.db
 
 # pytest 临时目录（addopts 里 --basetemp 指向这里）
 .pytest-tmp/
+
+# 向量模型缓存：可从镜像重新下载
+.cache/
