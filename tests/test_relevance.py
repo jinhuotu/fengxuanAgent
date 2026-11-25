@@ -2,7 +2,7 @@
 import pytest
 
 from app.core.config import Settings
-from app.rag.relevance import extract_probe_terms, select_relevant_hits
+from app.rag.relevance import choose_probe, extract_probe_terms, find_content_fragment, select_relevant_hits
 
 LEARNING_RATE_CANDIDATES = [
     {"score": 12.79, "content": "训练参数中可以设置学习率。"},
@@ -94,3 +94,42 @@ def test_empty_probe_preserves_original_order() -> None:
 ])
 def test_extract_probe_terms(query: str, expected_probe: str) -> None:
     assert extract_probe_terms(query) == expected_probe
+
+
+SLICING_CONTENTS = [
+    "上传文档后由服务端统一切片，切片按空行分段后再合并短段。",
+    "命令清单里记录了语料导入与评测脚本的用法。",
+    "架构文档描述了目录骨架与模块边界。",
+]
+
+# 做什么：核对长问句能从候选正文里挑出可区分片段，而非整句当探针
+# 入参：自然长问句与三条候选正文
+# 返回：无；未挑出片段、片段不在问句或命中全部候选时断言失败
+def test_find_content_fragment_on_long_question() -> None:
+    fragment = find_content_fragment("上传纯文本知识库文档如何同步切片？", SLICING_CONTENTS)
+    assert fragment and fragment in "上传纯文本知识库文档如何同步切片？"
+    assert any(fragment in content for content in SLICING_CONTENTS)
+    assert sum(1 for content in SLICING_CONTENTS if fragment in content) < len(SLICING_CONTENTS)
+
+
+# 做什么：核对长问句与候选毫无共同片段时关闭探针，而不是拿整句硬匹配
+# 入参：与候选无关的长问句
+# 返回：无；返回非空探针时断言失败
+def test_find_content_fragment_returns_empty_without_shared_text() -> None:
+    assert find_content_fragment("今天天气怎么样适合去哪里散步", SLICING_CONTENTS) == ""
+
+
+# 做什么：核对短问句仍走原有剥词路径，长问句才切到片段匹配
+# 入参：短问句、长问句与候选正文
+# 返回：无；两条分支的判断结果不符时断言失败
+def test_choose_probe_prefers_direct_term_then_fragment() -> None:
+    assert choose_probe("什么是学习率", SLICING_CONTENTS) == "学习率"
+    assert choose_probe("上传纯文本知识库文档如何同步切片？", SLICING_CONTENTS) != "上传纯文本知识库文档如何同步切片"
+
+
+# 做什么：核对片段匹配不会把疑问用语当探针
+# 入参：片段本身是疑问词、正文里却大量出现的构造
+# 返回：无；选中疑问用语时断言失败
+def test_find_content_fragment_skips_question_words() -> None:
+    contents = ["如何同步数据", "如何同步配置", "如何同步日志"]
+    assert find_content_fragment("如何同步", contents) == ""

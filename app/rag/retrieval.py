@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.knowledge import SEARCH_CANDIDATE_MIN
 from app.core.logging import get_logger
 from app.models.knowledge import IS_NOT_DELETED, KnowledgeChunk
-from app.rag.relevance import extract_probe_terms, select_relevant_hits
+from app.rag.relevance import choose_probe, extract_probe_terms, select_relevant_hits
 
 NATURAL_LANGUAGE_MATCH = "MATCH (knowledge_chunks.content) AGAINST (:term IN NATURAL LANGUAGE MODE)"
 logger = get_logger(__name__)
@@ -71,13 +71,18 @@ def search_relevant_chunks(
         settings.search_candidate_max, max(SEARCH_CANDIDATE_MIN, top_k * settings.search_candidate_multiplier),
     )
     candidates = search_chunks(db_session, owner_id, knowledge_base_id, query, top_k, candidate_limit=candidate_limit)
-    probe = extract_probe_terms(query)
+    # 长问句剥不出短词时改从候选正文里挑片段，短问句仍用原词。
+    probe = choose_probe(query, [candidate["content"] for candidate in candidates])
+    direct_probe = extract_probe_terms(query)
+    probe_source = "无"
+    if probe:
+        probe_source = "句式" if probe == direct_probe else "滑窗"
     hits = select_relevant_hits(
         candidates, top_k, settings.search_min_score_ratio, settings.search_min_score_absolute, probe=probe,
     )
     candidate_count = len(candidates)
     dropped = candidate_count - len(hits)
     probe_matches = [hit for hit in hits if probe and probe in hit["content"]]
-    logger.info("知识库检索过滤 | knowledge_base_id=%s | 候选=%s | 保留=%s | 丢弃=%s | 探针命中=%s",
-                knowledge_base_id, candidate_count, len(hits), dropped, len(probe_matches))
+    logger.info("知识库检索过滤 | knowledge_base_id=%s | 候选=%s | 保留=%s | 丢弃=%s | 探针命中=%s | 探针来源=%s",
+                knowledge_base_id, candidate_count, len(hits), dropped, len(probe_matches), probe_source)
     return RelevantSearchResult(hits=hits, candidates=candidate_count, dropped=dropped)
