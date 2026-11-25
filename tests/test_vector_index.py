@@ -12,6 +12,8 @@ from app.core.knowledge import DocumentStatus
 from app.db.base import Base
 from app.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
 from app.rag import retrieval, vector_index
+from app.schemas.knowledge import KnowledgeDocumentCreate
+from app.services import knowledge as knowledge_service
 
 VECTOR_DIM = 512
 OWNER_ID = 1
@@ -158,3 +160,18 @@ def test_hybrid_keeps_keyword_top1():
 def test_vector_filter_uses_relative_floor():
     candidates = [{"chunk_id": 1, "score": 0.8}, {"chunk_id": 2, "score": 0.45}, {"chunk_id": 3, "score": 0.2}]
     assert [hit["chunk_id"] for hit in retrieval._filter_vector(candidates, 5, 0.5)] == [1, 2]
+
+# 做什么：确认上传后的向量同步不会把请求会话留在未结束的事务里
+# 入参：隔离会话和内存客户端
+# 返回：事务残留时失败；残留会让随后的全文索引自检无法开启新事务
+def test_upload_leaves_no_open_transaction(sessions, memory_qdrant):
+    with sessions.begin() as db:
+        db.add(KnowledgeBase(id=1, owner_id=OWNER_ID, name="库1"))
+    db = sessions()
+    try:
+        content = "学习率是控制每次参数更新步长的超参数，取值过大会震荡，过小则收敛缓慢。\n\n" * 10
+        knowledge_service.create_knowledge_document(db, OWNER_ID, 1, KnowledgeDocumentCreate(title="资料", content=content))
+        assert not db.in_transaction()
+    finally:
+        db.close()
+    assert vector_index.count_points() > 0

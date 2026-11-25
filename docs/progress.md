@@ -205,3 +205,7 @@
 - 日期：2026-11-25。
 - 决定：知识库增加 TXT、Markdown、DOCX 和带文字层 PDF 文件上传。先校验归属和内存解析，再复用纯文本事务及双路索引。直接依赖锁定 python-docx 1.2.0 和 pypdf 6.21.4，迁移仍是 `d7f4e2a91c63`。
 - 验证：后端 394 项通过。新版在独立端口用真实 MySQL 和 Qdrant 验证 Markdown、Word、PDF 都进入就绪状态，删除 Word 后全文、向量和对应向量点均归零。受控模型问答的 PDF 引用编号、原文区间与历史快照一致，删引用文档后两路清零。现有上传全文自检曾记录 `InvalidRequestError`，独立全文查询实测可命中，本轮未改索引链路。页面验收以 8081 加载新版接口为前提。
+
+- 日期：2026-11-25。
+- 决定：修复上传后全文索引自检被静默跳过的问题。向量同步（45e183b）用请求会话做只读查询后没有结束事务，随后自检的 `db_session.begin()` 报 `InvalidRequestError`，被自检入口吞成 WARNING，JSON 与文件两条上传路径都受影响。
+- 说明：向量同步改在 `with db_session.begin()` 内执行，查完即结束事务；新增 `test_upload_leaves_no_open_transaction`（去掉修复即失败）。真实 MySQL 复验：两条路径自检均"命中条数=1"。全量回归 395 项通过。

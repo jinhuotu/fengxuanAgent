@@ -334,7 +334,10 @@ def _sync_vector_index_after_upload(
     if not vector_index.is_enabled():
         return
     try:
-        written = vector_index.sync_document(db_session, knowledge_base_id, owner_id, document_id)
+        # 新手注意：只读查询也会让会话自动开事务；不收尾的话，后面的全文自检再开事务就会报
+        # "A transaction is already begun"，自检等于被静默跳过。这里用 with 保证查完即结束事务。
+        with db_session.begin():
+            written = vector_index.sync_document(db_session, knowledge_base_id, owner_id, document_id)
         logger.info("向量索引同步 | owner_id=%s | knowledge_base_id=%s | document_id=%s | points=%s",
                     owner_id, knowledge_base_id, document_id, written)
     except Exception as error:
