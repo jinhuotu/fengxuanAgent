@@ -30,12 +30,15 @@ def mysql_sessions():
     assert settings.db_name == "chat_verify", "仅允许明确指定的独立测试库"
     assert settings.db_password == "chat-isolated-only", "禁止使用真实库凭证"
     engine = create_engine(settings.database_url, pool_pre_ping=True)
-    migration = load_chat_migration()
-    capacity_migration = load_chat_migration("7e9204b6d815_add_chat_generation_gate.py")
-    with engine.begin() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
+    migrations = (
+        load_chat_migration(),
+        load_chat_migration("7e9204b6d815_add_chat_generation_gate.py"),
+        load_chat_migration("af4cfc254421_add_chat_session_knowledge_base.py"),
+        load_chat_migration("d7f4e2a91c63_add_chat_message_references.py"),
+    )
+    with engine.begin() as connection, Operations.context(MigrationContext.configure(connection)):
+        for migration in migrations:
             migration.upgrade()
-            capacity_migration.upgrade()
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
     with sessions.begin() as db_session:

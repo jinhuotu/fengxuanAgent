@@ -36,6 +36,16 @@ class ChatSessionItem(BaseModel):
     knowledge_base_id: int | None = None
 
 
+class ChatMessageReference(BaseModel):
+    index: int
+    chunk_id: int
+    document_id: int
+    heading_path: str
+    char_start: int
+    char_end: int
+    score: float = Field(allow_inf_nan=False)
+
+
 class ChatMessageItem(BaseModel):
     id: int
     request_id: str
@@ -46,6 +56,7 @@ class ChatMessageItem(BaseModel):
     finish_reason: str | None
     error_code: str | None
     created_at: datetime
+    references: list[ChatMessageReference] = Field(default_factory=list)
 
 
 class PreparedTurn(BaseModel):
@@ -98,4 +109,5 @@ class TurnResult(BaseModel):
     completion_tokens: int | None = None
     finish_reason: str | None = None
     error_code: str | None = None
+    references: list[dict] = Field(default_factory=list)
 

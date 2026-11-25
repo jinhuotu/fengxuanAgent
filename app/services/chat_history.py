@@ -1,17 +1,20 @@
 """会话归属和分页历史；每个操作自行结束短事务。"""
 from datetime import datetime
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.chat import CHAT_TIMEZONE, ROLE_NAMES, STATUS_NAMES, MessageStatus
 from app.core.chat_errors import ChatNotFoundError
 from app.models.chat import ChatMessage, ChatSession
-from app.schemas.chat import ChatMessageItem, ChatPageQuery, ChatSessionItem
+from app.schemas.chat import ChatMessageItem, ChatMessageReference, ChatPageQuery, ChatSessionItem
 from app.schemas.auth import UserInfo
 from app.services.auth import resolve_current_user
 
 SessionFactory = sessionmaker[Session]
+# 新手注意：类型适配器像一张检查表，会逐条核对快照的字段与类型。
+REFERENCE_SNAPSHOT_ADAPTER = TypeAdapter(list[ChatMessageReference])
 
 
 # 做什么：取得与项目数据库时区一致的当前时间
@@ -115,6 +118,19 @@ def list_sessions(sessions: SessionFactory, user_id: int, pagination: ChatPageQu
     return {"items": items, "total": total, "page": pagination.page, "page_size": pagination.page_size}
 
 
+# 做什么：解码历史快照并核对每条引用是否完整
+# 入参：消息表中可为空的 JSON 快照
+# 返回：公开引用列表；空值或任一条格式无效时返回空列表
+def parse_references(raw: str | None) -> list[dict]:
+    if not raw:
+        return []
+    try:
+        references = REFERENCE_SNAPSHOT_ADAPTER.validate_json(raw, strict=True)
+    except ValidationError:
+        return []
+    return [reference.model_dump() for reference in references]
+
+
 # 做什么：把内部数字角色和状态转换成前端可读的字符串
 # 入参：一条消息模型
 # 返回：不含上游原始错误和其他用户资料的消息结构
@@ -123,7 +139,7 @@ def public_message(message: ChatMessage) -> dict:
         id=message.id, request_id=message.request_id, role=ROLE_NAMES[message.role],
         content=message.content, status=STATUS_NAMES[message.status], model=message.model,
         finish_reason=message.finish_reason, error_code=message.error_code,
-        created_at=message.created_at,
+        created_at=message.created_at, references=parse_references(message.references_json),
     ).model_dump(mode="json")
 
 

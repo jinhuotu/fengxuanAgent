@@ -180,6 +180,7 @@ async def model_events(sessions: SessionFactory, turn: PreparedTurn, result: Tur
     if plan.history_truncated:
         yield encode_event("context", context_notice(plan))
     if bundle.items:
+        result.references = list(bundle.items)
         yield encode_event("references", {"items": bundle.items})
     iterator = stream_model(plan.messages, compose_question(bundle.block, turn.content))
     events = pump_chunks(sessions, turn, iterator, result)

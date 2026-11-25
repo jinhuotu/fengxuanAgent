@@ -1,4 +1,5 @@
 """验证本人隔离、请求幂等和结束状态，全部使用独立内存库。"""
+import json
 from datetime import timedelta
 from uuid import uuid4
 
@@ -12,6 +13,14 @@ from app.schemas.chat import ChatPageQuery, TurnResult
 from app.services.chat_history import create_session, current_chat_time, list_messages, list_sessions
 from app.services.chat_turns import finish_turn, interrupt_turn, prepare_turn
 from tests.chat_support import chat_sessions, history_items, new_turn
+
+
+REFERENCE_SNAPSHOTS = [
+    {"index": 1, "chunk_id": 18, "document_id": 3, "heading_path": "工艺手册 > 第1段",
+     "char_start": 0, "char_end": 12, "score": 2.17},
+    {"index": 2, "chunk_id": 19, "document_id": 4, "heading_path": "操作规范 > 第3段",
+     "char_start": 12, "char_end": 30, "score": 1.25},
+]
 
 
 # 做什么：确认列表、历史、发送和中断均不能跨用户访问
@@ -92,4 +101,46 @@ def test_message_history_pagination_is_ordered(chat_sessions):
     assert earlier["items"][0]["role"] == "user"
     assert latest["total"] == 2
     assert "user_id" not in latest["items"][0]
+
+
+# 做什么：从历史读取两条带完整字段的引用快照
+# 入参：隔离会话工厂
+# 返回：无；快照字段或顺序不一致时断言失败
+def test_message_history_reads_reference_snapshots(chat_sessions):
+    turn = new_turn(chat_sessions)
+    with chat_sessions.begin() as db_session:
+        assistant = db_session.get(ChatMessage, turn.assistant_id)
+        assistant.references_json = json.dumps(REFERENCE_SNAPSHOTS, ensure_ascii=False)
+    question, answer = history_items(chat_sessions, turn.session_id)
+    assert question["references"] == []
+    assert answer["references"] == REFERENCE_SNAPSHOTS
+
+
+# 做什么：确认损坏的快照不会破坏整页消息的读取
+# 入参：隔离会话工厂和不同种类的无效 JSON 快照
+# 返回：无；快照没有退化为空列表时断言失败
+@pytest.mark.parametrize("raw", ["not json", "{}", '[{"index":1}]'])
+def test_invalid_reference_snapshot_leaves_history_readable(chat_sessions, raw):
+    turn = new_turn(chat_sessions)
+    with chat_sessions.begin() as db_session:
+        assistant = db_session.get(ChatMessage, turn.assistant_id)
+        assistant.references_json = raw
+    assert history_items(chat_sessions, turn.session_id)[-1]["references"] == []
+
+
+# 做什么：确认中断后旧请求仍保存已经给出的引用
+# 入参：隔离会话工厂
+# 返回：无；丢失引用或覆盖已保存的长正文时断言失败
+def test_interrupted_turn_keeps_reference_snapshot(chat_sessions):
+    turn = new_turn(chat_sessions)
+    with chat_sessions.begin() as db_session:
+        assistant = db_session.get(ChatMessage, turn.assistant_id)
+        assistant.content = "已保存的较长正文"
+    assert interrupt_turn(chat_sessions, 1, turn.session_id, turn.request_id)
+    result = TurnResult(status=MessageStatus.COMPLETED, content="短正文", references=REFERENCE_SNAPSHOTS)
+    assert not finish_turn(chat_sessions, turn, result)
+    answer = history_items(chat_sessions, turn.session_id)[-1]
+    assert answer["status"] == "interrupted"
+    assert answer["content"] == "已保存的较长正文"
+    assert answer["references"] == REFERENCE_SNAPSHOTS
 

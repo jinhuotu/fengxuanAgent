@@ -46,6 +46,9 @@ class ChatMessage(Base):
     request_id: Mapped[str] = mapped_column(String(36), comment="客户端请求编号，同一次问题和回答共用编号")
     role: Mapped[int] = mapped_column(STATUS_TYPE, comment="消息角色，一表示用户，二表示助手")
     content: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), default="", comment="消息正文，失败或中断时可保存已生成的部分回答")
+    references_json: Mapped[str | None] = mapped_column(
+        Text, default=None, comment="本轮引用的 JSON 快照，空表示未使用知识库或引用为空",
+    )
     status: Mapped[int] = mapped_column(STATUS_TYPE, comment="消息状态，一生成中，二完成，三失败，四中断")
     model: Mapped[str | None] = mapped_column(String(100), default=None, comment="助手回答使用的模型标识，用户消息为空")
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, default=None, comment="模型输入令牌数，未知时为空")

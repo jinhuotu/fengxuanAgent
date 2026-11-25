@@ -230,6 +230,20 @@ def test_selected_base_sends_references_before_first_delta(
     assert search_stub.call_args.args[1:] == (OWNER_ID, OWN_BASE_ID, QUESTION, 5)
 
 
+# 做什么：确认模型流发出的引用在回答收尾后能通过历史接口回读
+# 入参：隔离客户端、检索替身和假模型生成记录
+# 返回：无；事件和历史快照不一致时断言失败
+def test_completed_turn_persists_stream_references(rag_client, search_stub, recorded_generation):
+    session_id = new_session(rag_client)["id"]
+    assert select_base(rag_client, session_id, OWN_BASE_ID).status_code == 200
+    events = dict(submit_question(rag_client, session_id))
+    response = rag_client.get(f"{SESSIONS_URL}/{session_id}/messages")
+    assert response.status_code == 200
+    answer = response.json()["data"]["items"][-1]
+    assert answer["id"] == events["completed"]["assistant_id"]
+    assert answer["references"] == events["references"]["items"] == [REFERENCE]
+
+
 # 做什么：验证低相关候选退出引用和模型提示词，日志保留统计
 # 入参：隔离客户端、搜索替身、模拟模型收集器及日志捕获器
 # 返回：无；噪声进入引用、模型或日志时断言失败

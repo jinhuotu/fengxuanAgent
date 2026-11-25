@@ -1,4 +1,5 @@
 """生成请求的事务边界、去重和中断；数据库占用只持续短事务。"""
+import json
 import logging
 from datetime import timedelta
 
@@ -73,6 +74,7 @@ def finish_turn(sessions: SessionFactory, turn: PreparedTurn, result: TurnResult
     with sessions.begin() as db_session:
         chat_session = owned_session(db_session, turn.user_id, turn.session_id, lock=True)
         assistant = db_session.get(ChatMessage, turn.assistant_id)
+        assistant.references_json = json.dumps(result.references, ensure_ascii=False) if result.references else None
         if chat_session.active_request_id != turn.request_id:
             preserve_interrupted_content(assistant, result.content)
             return False
