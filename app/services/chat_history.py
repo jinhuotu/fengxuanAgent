@@ -2,13 +2,15 @@
 from datetime import datetime
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.chat import CHAT_TIMEZONE, ROLE_NAMES, STATUS_NAMES, MessageStatus
-from app.core.chat_errors import ChatNotFoundError
+from app.core.chat_errors import ChatBusyError, ChatNotFoundError
 from app.models.chat import ChatMessage, ChatSession
-from app.schemas.chat import ChatMessageItem, ChatMessageReference, ChatPageQuery, ChatSessionItem
+from app.schemas.chat import (
+    ChatClearResult, ChatDeleteResult, ChatMessageItem, ChatMessageReference, ChatPageQuery, ChatSessionItem,
+)
 from app.schemas.auth import UserInfo
 from app.services.auth import resolve_current_user
 
@@ -100,6 +102,68 @@ def get_session_state(sessions: SessionFactory, user_id: int, session_id: int) -
         recover_expired(db_session, chat_session)
         db_session.flush()
         return public_session(chat_session)
+
+
+# 做什么：软删除本人一条会话及其中全部消息，正在生成时拒绝
+# 入参：会话工厂、用户编号和会话编号
+# 返回：删除的消息条数；不存在或属于他人抛 404，生成中抛 409
+def delete_session(sessions: SessionFactory, user_id: int, session_id: int) -> ChatDeleteResult:
+    with sessions.begin() as db_session:
+        # 行锁先拿归属：并发的"发消息"会被挡住，见下面的先后顺序
+        chat_session = owned_session(db_session, user_id, session_id, lock=True)
+        # 占用已过期时先恢复成中断，避免把"其实没在生成"的会话误判成忙
+        recover_expired(db_session, chat_session)
+        if chat_session.active_request_id:
+            raise ChatBusyError()
+        deleted_messages = mark_messages_deleted(db_session, [session_id])
+        soft_delete_session(chat_session)
+        return ChatDeleteResult(session_id=session_id, deleted_messages=deleted_messages)
+
+
+# 做什么：软删除本人全部有效会话，任一正在生成时整批拒绝
+# 入参：会话工厂和用户编号
+# 返回：删除的会话与消息条数；生成中抛 409
+def clear_sessions(sessions: SessionFactory, user_id: int) -> ChatClearResult:
+    with sessions.begin() as db_session:
+        # 按编号升序加锁：同一用户的两次清空请求不会互相插队，也不会和发消息形成环
+        session_rows = list(db_session.scalars(
+            select(ChatSession).where(ChatSession.user_id == user_id, ChatSession.is_deleted == 0)
+            .order_by(ChatSession.id).with_for_update()
+        ))
+        if not session_rows:
+            return ChatClearResult(deleted_sessions=0, deleted_messages=0)
+        for chat_session in session_rows:
+            recover_expired(db_session, chat_session)
+        # 先检查再动手：只要有一条真在生成，整批都不删，避免"删到一半失败"
+        if any(chat_session.active_request_id for chat_session in session_rows):
+            raise ChatBusyError()
+        deleted_messages = mark_messages_deleted(db_session, [chat_session.id for chat_session in session_rows])
+        for chat_session in session_rows:
+            soft_delete_session(chat_session)
+        return ChatClearResult(deleted_sessions=len(session_rows), deleted_messages=deleted_messages)
+
+
+# 做什么：把指定会话下的消息批量标记删除
+# 入参：数据库会话和会话编号列表
+# 返回：本次实际标记的条数
+def mark_messages_deleted(db_session: Session, session_ids: list[int]) -> int:
+    result = db_session.execute(
+        update(ChatMessage)
+        .where(ChatMessage.session_id.in_(session_ids), ChatMessage.is_deleted == 0)
+        .values(is_deleted=1)
+    )
+    return result.rowcount or 0
+
+
+# 做什么：清掉会话的生成占用并置软删，同时让旧上下文缓存失效
+# 入参：已加锁的会话模型
+# 返回：无
+def soft_delete_session(chat_session: ChatSession) -> None:
+    chat_session.is_deleted = 1
+    chat_session.active_request_id = None
+    chat_session.generation_expires_at = None
+    # 版本号加一：Redis 候选缓存键含版本，旧键不可能再被这个会话读到
+    chat_session.history_version += 1
 
 
 # 做什么：分页查询本人有效会话，最近更新的排在前面

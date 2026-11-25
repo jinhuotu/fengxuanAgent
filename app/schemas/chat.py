@@ -111,3 +111,13 @@ class TurnResult(BaseModel):
     error_code: str | None = None
     references: list[dict] = Field(default_factory=list)
 
+
+class ChatDeleteResult(BaseModel):
+    session_id: int
+    deleted_messages: int
+
+
+class ChatClearResult(BaseModel):
+    deleted_sessions: int
+    deleted_messages: int
+

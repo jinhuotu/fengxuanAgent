@@ -62,6 +62,19 @@ def list_sessions_endpoint(pagination: ChatPageQuery = Query(), current_user: Us
 # 做什么：为本人的空闲会话选择知识库或解除选择
 # 入参：会话编号、可为空的知识库编号、当前用户和会话工厂
 # 返回：统一响应中的会话公开字段；会话和库的校验失败走既有错误响应
+@router.delete("/sessions", summary="清空本人全部对话")
+def clear_sessions_endpoint(current_user: UserInfo = Depends(get_chat_user),
+                            sessions=Depends(get_chat_sessions)) -> dict:
+    return success(chat_history.clear_sessions(sessions, current_user.id).model_dump(mode="json"))
+
+
+@router.delete("/sessions/{session_id}", summary="删除本人对话")
+def delete_session_endpoint(session_id: int, current_user: UserInfo = Depends(get_chat_user),
+                            sessions=Depends(get_chat_sessions)) -> dict:
+    result = chat_history.delete_session(sessions, current_user.id, session_id)
+    return success(result.model_dump(mode="json"))
+
+
 @router.put("/sessions/{session_id}/knowledge-base", summary="更新会话所选知识库")
 def set_session_knowledge_base_endpoint(
     session_id: int, payload: ChatSessionKnowledgeBaseUpdate,

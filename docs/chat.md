@@ -5,7 +5,7 @@
 第三方 DeepSeek `deepseek-flash`，文本流式回答，MySQL 保存历史，Redis 按需缓存近期成功上下文。
 所有正常登录用户可用；会话列表、历史、发送和中断都只允许本人访问，管理员也不例外。
 同一用户可以在不同会话同时生成，切换或新建会话不会中断旧任务；同一会话一次只生成一个回答。关闭、刷新或离开整个对话页会中断本页面全部任务，部分回答在历史中标记中断。
-本次没有加入向量库、知识库、工具调用、会话删除或管理他人历史。
+本次没有加入向量库、知识库、工具调用或管理他人历史；会话删除只做本人软删，不提供恢复入口。
 
 ## 启用顺序
 
@@ -74,9 +74,12 @@ uv run --no-sync uvicorn app.main:app --reload --port 8081
 | POST /chat/sessions/{id}/requests/{request_id}/interrupt | 幂等中断本人指定请求 |
 | GET /chat/sessions/{id}/requests/{request_id} | 按原 UUID 查询本人问题、回答、忙状态、最新活动 UUID 和重试资格，不调用模型 |
 | GET /chat/sessions/{id}/state | 查询本人会话的历史版本和有效活动 UUID，恢复过期占用，不返回消息正文 |
+| DELETE /chat/sessions/{id} | 删除本人一条会话：生成中拒绝，成功后消息与会话一起软删 |
+| DELETE /chat/sessions | 清空本人全部会话：任一条在生成时整批拒绝，不做部分删除 |
 
 普通接口沿用 `{code, message, data}`。身份失效 401，非本人或不存在的会话统一 404。
 重复请求返回 409/3003，正在生成返回 409/3002，未配置 Key 返回 503/5002。
+单删返回 `{session_id, deleted_messages}`，清空返回 `{deleted_sessions, deleted_messages}`。删除走 `is_deleted=1` 软删，同时清空活动请求和生成到期时间、历史版本加一，因此旧 Redis 候选缓存键不会再被该会话读到；消息行保留以满足请求去重唯一约束。删除不可恢复，没有回收站。
 全站满额在 SSE 开始前返回 JSON `429/3004`，不写入本轮消息，不排队；前端保留问题供重发。准入锁记录失效返回 `503/3005`，缺表等数据库故障走既有安全错误处理，不绕过额度保护。
 请求查询返回 `{request_id, question, answer, session_busy, can_retry, history_version, active_request_id}`，question/answer 沿用公开消息结构。未知或不完整轮次为 `404/3006`；非本人会话仍为既有 404，不返回其他用户内容。查询也会恢复已到期占用。会话列表、历史中的 session 和状态接口统一带 history_version、active_request_id、generation_expires_at；列表只展示有效占用，状态查询在短事务中恢复过期占用。状态和结果响应设置 Cache-Control: no-store，前端查询也禁用缓存。
 问题去除首尾空白后不能为空，最多 4000 字符。分页默认 20 条，最多 100 条。
@@ -266,3 +269,8 @@ storage 中的登录键变化或 clear、可见/焦点校准发现 token 变化�
 后端保留一项既有 TestClient 弃用警告，前端构建保留体积提示；本次未为消除提示引入额外依赖或重构。
 新增的是永久测试和文档，没有临时验证脚本；独立 MySQL 测试容器在验证完成后停止并清理。
 
+
+
+- 日期：2026-11-25。
+- 决定：其他标签页不实时移除被删会话，删除不新增广播；切回或刷新时由既有的可见性校准刷新列表。
+- 说明：`chatTabSync` 的通知字段有白名单和对应测试，为删除单独扩一种消息会动 schema 与断言；第一版先接受「切回即消失」，等有实际需要再扩。

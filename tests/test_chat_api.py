@@ -11,6 +11,9 @@ from app.services import chat_stream
 from tests.chat_support import chat_sessions
 from tests.chat_support import new_turn
 from app.core.config import get_settings
+from app.core.chat import MessageStatus
+from app.schemas.chat import TurnResult
+from app.services.chat_turns import finish_turn, prepare_turn
 from tests.test_chat_stream import completed_model
 
 
@@ -200,3 +203,30 @@ def test_session_state_requires_login_and_hides_deleted_session(chat_client, cha
         db_session.get(ChatSession, turn.session_id).is_deleted = 1
     assert chat_client.get(path, headers=user_headers(1)).status_code == 404
 
+
+
+# 做什么：确认删除与清空接口的鉴权、成功响应和生成中拒绝
+# 入参：真实测试客户端和隔离会话工厂
+# 返回：状态码或统计字段不符时失败
+def test_chat_delete_and_clear_endpoints(chat_client, chat_sessions):
+    assert chat_client.delete("/chat/sessions").status_code == 401
+    headers = user_headers(1)
+    session_id = chat_client.post("/chat/sessions", headers=headers).json()["data"]["id"]
+    chat_client.post(f"/chat/sessions/{session_id}/messages",
+                     json={"request_id": str(uuid4()), "content": "你好"}, headers=headers)
+    deleted = chat_client.delete(f"/chat/sessions/{session_id}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json()["data"] == {"session_id": session_id, "deleted_messages": 2}
+    assert chat_client.get(f"/chat/sessions/{session_id}/messages", headers=headers).status_code == 404
+
+    busy_id = chat_client.post("/chat/sessions", headers=headers).json()["data"]["id"]
+    busy_turn = prepare_turn(chat_sessions, 1, busy_id, str(uuid4()), "生成中")
+    busy = chat_client.delete(f"/chat/sessions/{busy_id}", headers=headers)
+    assert busy.status_code == 409
+    assert busy.json()["code"] == 3002
+    finish_turn(chat_sessions, busy_turn, TurnResult(status=MessageStatus.COMPLETED, content="收尾回答"))
+
+    cleared = chat_client.delete("/chat/sessions", headers=headers)
+    assert cleared.status_code == 200
+    assert cleared.json()["data"]["deleted_sessions"] == 1
+    assert chat_client.get("/chat/sessions", headers=headers).json()["data"]["total"] == 0

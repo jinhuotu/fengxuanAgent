@@ -192,3 +192,8 @@
 - 决定：补足日志五处：请求编号中间件与访问日志、业务错误留痕、模型错误 WARNING 行、流内异常带堆栈、缓存失败补 `error_type`，并在 `docs/architecture.md` 新增「日志约定」一节。
 - 说明：日志格式增加 `请求编号` 列（`contextvars` + 格式化器注入，后台任务显示 `-`）；`BusinessError` 记录 `code`/`http`/`user_id`，`1000~1004` 不重复记；`chat_stream` 捕获模型异常记 `WARNING`（`error_code`/`http`/`error_type`），普通异常改 `logger.exception` 保留堆栈。全量回归 364 项通过；`TestClient` 实测响应头回显 `X-Request-ID`、日志行为 `时间 | 级别 | 模块 | 编号 | 内容`。本机 8081 现有进程未加载新代码，响应头暂为空，需重启后端。
 
+
+
+- 日期：2026-11-25。
+- 决定：对话页补上删除会话与一键清空：单删、清空都走软删，不提供恢复；生成中的会话单删返回 409/3002，清空时只要一条在生成就整批拒绝，不做部分删除。
+- 说明：`ChatSession`/`ChatMessage` 原本就有 `is_deleted` 软删字段和对应索引，本刀无迁移。`chat_history.py` 新增 `delete_session`/`clear_sessions`/`mark_messages_deleted`/`soft_delete_session`：先锁会话再恢复过期占用，仍在生成则拒绝；成功时清空 `active_request_id`、`generation_expires_at`，`history_version` 加一，使旧 Redis 候选缓存键失效。接口新增 `DELETE /chat/sessions/{id}` 与 `DELETE /chat/sessions`，响应 `{session_id, deleted_messages}` / `{deleted_sessions, deleted_messages}`。测试新增 `tests/test_chat_delete.py` 七条与 `test_chat_api.py` 接口用例一条（鉴权、200、409、清空计数）；全量回归 372 项通过。
