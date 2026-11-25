@@ -57,6 +57,32 @@ uv run python scripts/seed_rbac.py
 - 执行方式：在仓库根目录运行 `uv run --no-sync python scripts/acceptance_stage2.py --username admin`。
 - 注意：在真实终端用 `getpass` 输入 A 和两个验收账号的密码。新建验收账号时输入新密码并自行保存，复用时输入原密码。使用专用的 `accept_b`、`accept_c`，脚本会实际改变其角色和状态。脚本通过 API 操作，缺路由或权限时停止。 [报告模板](验收/阶段二.md)
 
+### scripts/corpus_import.py
+
+- 用途：把指定目录中的 UTF-8 `.txt` 和 `.md` 批量上传为知识库文档。
+- 参数：`--username`、`--password`、`--dir` 必填。`--base-url` 默认 `http://127.0.0.1:8081`。`--kb-name` 默认「语料库」，`--base-id` 可直接指定现有库，`--dry-run` 只检查本地并输出计划。
+- 前置条件：真实导入需要可登录的服务和账号。预览只读取语料目录。
+- 可否重复执行：可以。库内已有同标题文档会跳过。按目录一层扫描，不支持的扩展名会列出并停止整批导入。
+- 执行方式：`uv run --no-sync python scripts/corpus_import.py --dir $corpusDir --username admin --password $password`。
+
+### scripts/search_eval.py
+
+- 用途：用固定问题评测检索结果，按轮次追加 Markdown 表格和汇总。
+- 参数：`--username`、`--password`、`--base-id` 必填。`--base-url` 默认 `http://127.0.0.1:8081`，`--questions` 默认 `scripts/eval_questions.txt`，`--top-k` 默认 `5`，`--out` 默认 `docs/评测/检索质量.md`。
+- 前置条件：目标库属于登录账号，语料和问题文件已准备好。
+- 可否重复执行：可以。每轮追加一张表，便于按相同问题比对阈值。
+- 执行方式：`uv run --no-sync python scripts/search_eval.py --base-id $baseId --username admin --password $password`。 [检索质量报告](评测/检索质量.md)
+
+### scripts/eval_questions.txt
+
+- 用途：评测默认问题模板。每行是 `问题` 或 `问题|期望命中的文档标题`，空行和 `#` 注释行可用于分组说明。
+- 前置条件：使用五条示例时按报告准备对应的仓库文档，标题使用不含扩展名的文件名。
+
+### scripts/knowledge_http.py
+
+- 用途：两个开发期脚本共用的标准库 HTTP 模块，封装登录、认证和分页。
+- 执行方式：由两个脚本导入，作为同目录模块保留。
+
 ## 三、部署到新服务器的顺序
 
 1. 装依赖：`uv sync --frozen --no-dev`

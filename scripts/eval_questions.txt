@@ -1,0 +1,7 @@
+# 每行一个问题。竖线后可写库内文档标题，标题不含文件扩展名。
+# 示例使用仓库 docs 中的 architecture.md、chat.md、验收/阶段二.md 和 scripts.md。
+上传纯文本知识库文档如何同步切片？|architecture
+对话请求如何按原 UUID 确认结果？|chat
+最后管理员保护由哪条自动化用例覆盖？|阶段二
+怎样用 seed_rbac.py 初始化角色和权限点？|scripts
+全文检索按相关性和切片编号怎样排序？|architecture
