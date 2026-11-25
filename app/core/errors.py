@@ -30,6 +30,12 @@ CODE_LAST_ADMIN_PROTECTED = 2004
 CODE_KNOWLEDGE_BASE_NOT_FOUND = 4001
 CODE_KNOWLEDGE_DOCUMENT_NOT_FOUND = 4002
 CODE_KNOWLEDGE_CHUNK_NOT_FOUND = 4003
+CODE_KNOWLEDGE_UPLOAD_INVALID = 4004
+CODE_KNOWLEDGE_UPLOAD_TYPE = 4005
+CODE_KNOWLEDGE_UPLOAD_SIZE = 4006
+CODE_KNOWLEDGE_UPLOAD_PARSE = 4007
+CODE_KNOWLEDGE_UPLOAD_CONTENT = 4008
+CODE_KNOWLEDGE_UPLOAD_TIMEOUT = 4009
 CODE_INTERNAL_ERROR = 5000
 
 DEFAULT_HTTP_STATUS = 400
@@ -195,6 +201,41 @@ class KnowledgeChunkNotFoundError(BusinessError):
     code = CODE_KNOWLEDGE_CHUNK_NOT_FOUND
     http_status = 404
     message = "知识库切片不存在"
+
+
+class KnowledgeUploadInvalidError(BusinessError):
+    code = CODE_KNOWLEDGE_UPLOAD_INVALID
+    message = "请通过 file 字段上传一个文件"
+
+
+class KnowledgeUploadTypeError(BusinessError):
+    code = CODE_KNOWLEDGE_UPLOAD_TYPE
+    http_status = 415
+    message = "仅支持 .txt、.md、.docx、.pdf 文件"
+
+
+class KnowledgeUploadSizeError(BusinessError):
+    code = CODE_KNOWLEDGE_UPLOAD_SIZE
+    http_status = 413
+    message = "文件不能超过 10 MB，请拆分后上传"
+
+
+class KnowledgeUploadParseError(BusinessError):
+    code = CODE_KNOWLEDGE_UPLOAD_PARSE
+    http_status = 422
+    message = "文件解析失败，请确认文件完整且未加密"
+
+
+class KnowledgeUploadContentError(BusinessError):
+    code = CODE_KNOWLEDGE_UPLOAD_CONTENT
+    http_status = 422
+    message = "文件没有可用正文，请检查内容后上传"
+
+
+class KnowledgeUploadTimeoutError(BusinessError):
+    code = CODE_KNOWLEDGE_UPLOAD_TIMEOUT
+    http_status = 408
+    message = "文件解析超时，请拆分后重试"
 
 
 # 做什么：把上面这些异常接住，转成统一响应结构

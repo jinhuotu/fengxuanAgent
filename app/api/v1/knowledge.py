@@ -1,5 +1,5 @@
 """登录用户的知识库与文档接口。"""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -12,10 +12,16 @@ from app.schemas.knowledge import (
     KnowledgeDocumentCreate,
 )
 from app.services import knowledge as knowledge_service
+from app.services.knowledge_upload import upload_knowledge_document
 from app.utils.response import success
 
 router = APIRouter(prefix="/knowledge-bases", tags=["知识库"])
 chunk_router = APIRouter(prefix="/knowledge-chunks", tags=["知识库"])
+FILE_UPLOAD_REQUEST = {"requestBody": {"required": True, "content": {
+    "multipart/form-data": {"schema": {
+        "type": "object", "required": ["file"], "properties": {"file": {"type": "string", "format": "binary"}},
+    }},
+}}}
 
 
 # 做什么：按切片编号返回本人引用所指的原文片段
@@ -70,6 +76,22 @@ def create_knowledge_document(
 ) -> dict:
     document = knowledge_service.create_knowledge_document(
         db_session, current_user.id, knowledge_base_id, payload
+    )
+    return success(document.model_dump(mode="json"))
+
+
+# 做什么：接收文件流并交给知识库上传服务
+# 入参：库编号、上传请求、已登录用户和独立写入会话
+# 返回：与纯文本上传一致的文档；归属或文件无效时返回业务错误
+@router.post("/{knowledge_base_id}/documents/file", summary="上传知识库文件", openapi_extra=FILE_UPLOAD_REQUEST)
+async def create_knowledge_document_from_file(
+    knowledge_base_id: int,
+    request: Request,
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db, use_cache=False),
+) -> dict:
+    document = await upload_knowledge_document(
+        db_session, current_user.id, knowledge_base_id, request.headers.get("content-type", ""), request.stream(),
     )
     return success(document.model_dump(mode="json"))
 
