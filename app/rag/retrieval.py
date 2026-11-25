@@ -19,6 +19,7 @@ logger = get_logger(__name__)
 @dataclass(frozen=True)
 class RelevantSearchResult:
     hits: list[RowMapping]
+    candidates: int
     dropped: int
 
 
@@ -61,7 +62,7 @@ def search_chunks(
 
 # 做什么：多取一次全文候选，在内存过滤并截断，记录结果数量
 # 入参：数据库会话、归属用户编号、知识库编号、查询词和结果上限
-# 返回：保留的命中及未入选条数；数据库异常直接抛出
+# 返回：保留的命中、原始候选条数及未入选条数；数据库异常直接抛出
 def search_relevant_chunks(
     db_session: Session, owner_id: int, knowledge_base_id: int, query: str, top_k: int,
 ) -> RelevantSearchResult:
@@ -71,7 +72,8 @@ def search_relevant_chunks(
     )
     candidates = search_chunks(db_session, owner_id, knowledge_base_id, query, top_k, candidate_limit=candidate_limit)
     hits = select_relevant_hits(candidates, top_k, settings.search_min_score_ratio, settings.search_min_score_absolute)
-    dropped = len(candidates) - len(hits)
+    candidate_count = len(candidates)
+    dropped = candidate_count - len(hits)
     logger.info("知识库检索过滤 | knowledge_base_id=%s | 候选=%s | 保留=%s | 丢弃=%s",
-                knowledge_base_id, len(candidates), len(hits), dropped)
-    return RelevantSearchResult(hits=hits, dropped=dropped)
+                knowledge_base_id, candidate_count, len(hits), dropped)
+    return RelevantSearchResult(hits=hits, candidates=candidate_count, dropped=dropped)

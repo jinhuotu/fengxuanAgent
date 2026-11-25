@@ -68,15 +68,20 @@ uv run python scripts/seed_rbac.py
 ### scripts/search_eval.py
 
 - 用途：用固定问题评测检索结果，按轮次追加 Markdown 表格和汇总。
-- 参数：`--username`、`--password`、`--base-id` 必填。`--base-url` 默认 `http://127.0.0.1:8081`，`--questions` 默认 `scripts/eval_questions.txt`，`--top-k` 默认 `5`，`--out` 默认 `docs/评测/检索质量.md`。
+- 参数：`--username`、`--password`、`--base-id` 必填。`--base-url` 默认 `http://127.0.0.1:8081`，`--questions` 默认 `scripts/eval_questions.txt`，`--top-k` 默认 `5`，`--threshold-note` 默认 `ratio=0.5 / abs=0`，`--out` 默认 `docs/评测/检索质量.md`。
 - 前置条件：目标库属于登录账号，语料和问题文件已准备好。
-- 可否重复执行：可以。每轮追加一张表，便于按相同问题比对阈值。
+- 可否重复执行：可以。每轮追加一张表，标题带阈值说明。旧版服务缺少候选、丢弃字段或问题文件仍有盲测占位时退出。
 - 执行方式：`uv run --no-sync python scripts/search_eval.py --base-id $baseId --username admin --password $password`。 [检索质量报告](评测/检索质量.md)
 
 ### scripts/eval_questions.txt
 
 - 用途：评测默认问题模板。每行是 `问题` 或 `问题|期望命中的文档标题`，空行和 `#` 注释行可用于分组说明。
 - 前置条件：使用五条示例时按报告准备对应的仓库文档，标题使用不含扩展名的文件名。
+
+### scripts/eval_blind_questions.txt
+
+- 用途：保留十条待填占位与跨语料盲测规则。由出题人复制模板、先写题、再核对期望标题。
+- 执行方式：填好后用 `scripts/search_eval.py --questions $blindQuestions` 指定题目文件。 [盲测流程](评测/检索质量.md#盲测轮次)
 
 ### scripts/knowledge_http.py
 

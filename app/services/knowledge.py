@@ -366,7 +366,7 @@ def list_knowledge_documents(
 
 # 做什么：检查知识库归属后检索切片，组装命中的公开字段
 # 入参：请求级会话、当前用户编号、知识库编号和已校验的搜索请求
-# 返回：切片命中列表；知识库不可见时抛 KnowledgeBaseNotFoundError
+# 返回：切片命中列表和候选、丢弃计数；知识库不可见时抛 KnowledgeBaseNotFoundError
 def search_knowledge_chunks(
     db_session: Session, owner_id: int, knowledge_base_id: int, payload: KnowledgeChunkSearchRequest
 ) -> KnowledgeChunkSearchResponse:
@@ -375,4 +375,4 @@ def search_knowledge_chunks(
         db_session, owner_id, knowledge_base_id, payload.query, payload.top_k
     )
     items = [KnowledgeChunkSearchItem.model_validate(chunk_row) for chunk_row in result.hits]
-    return KnowledgeChunkSearchResponse(items=items)
+    return KnowledgeChunkSearchResponse(items=items, candidates=result.candidates, dropped=result.dropped)

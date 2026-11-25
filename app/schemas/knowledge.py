@@ -125,3 +125,5 @@ class KnowledgeChunkSearchItem(BaseModel):
 
 class KnowledgeChunkSearchResponse(BaseModel):
     items: list[KnowledgeChunkSearchItem]
+    candidates: int = Field(ge=0, description="筛选前实际取到的候选条数")
+    dropped: int = Field(ge=0, description="候选条数减去最终返回的命中条数")
