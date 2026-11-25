@@ -94,6 +94,18 @@ class KnowledgeChunkListResponse(BaseModel):
     page_size: int
 
 
+class KnowledgeChunkDetail(BaseModel):
+    chunk_id: int
+    knowledge_base_id: int
+    document_id: int
+    document_title: str
+    chunk_index: int
+    heading_path: str
+    char_start: int
+    char_end: int
+    content: str
+
+
 class KnowledgeBaseDeleteResult(BaseModel):
     id: int
     deleted_documents: int

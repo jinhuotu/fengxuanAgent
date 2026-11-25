@@ -4,7 +4,7 @@ from time import sleep
 from sqlalchemy import ColumnElement, and_, func, select, update
 from sqlalchemy.orm import Session
 
-from app.core.errors import KnowledgeBaseNotFoundError, KnowledgeDocumentNotFoundError
+from app.core.errors import KnowledgeBaseNotFoundError, KnowledgeChunkNotFoundError, KnowledgeDocumentNotFoundError
 from app.core.knowledge import (
     INDEX_PROBE_MAX_CHARS, INDEX_PROBE_RETRY_SECONDS, INDEX_PROBE_TOP_K,
     SEARCH_QUERY_MIN_CHARS, SOFT_DELETED, DocumentStatus,
@@ -21,6 +21,7 @@ from app.schemas.knowledge import (
     KnowledgeBaseItem,
     KnowledgeBaseListQuery,
     KnowledgeBaseListResponse,
+    KnowledgeChunkDetail,
     KnowledgeChunkItem,
     KnowledgeChunkListResponse,
     KnowledgeChunkSearchItem,
@@ -245,6 +246,27 @@ def list_knowledge_document_chunks(
         item_rows = db_session.execute(item_query).mappings().all()
         items = [KnowledgeChunkItem.model_validate(item_row) for item_row in item_rows]
     return KnowledgeChunkListResponse(items=items, total=total, page=query.page, page_size=query.page_size)
+
+
+# 做什么：按全局切片编号读取本人切片及所属文档标题
+# 入参：请求级数据库会话、当前用户和切片编号
+# 返回：切片详情；切片或所属文档不可见时抛 KnowledgeChunkNotFoundError
+def get_knowledge_chunk(db_session: Session, owner_id: int, chunk_id: int) -> KnowledgeChunkDetail:
+    chunk = db_session.scalar(select(KnowledgeChunk).where(
+        KnowledgeChunk.id == chunk_id, KnowledgeChunk.owner_id == owner_id, KnowledgeChunk.is_deleted == IS_NOT_DELETED,
+    ))
+    if chunk is None:
+        raise KnowledgeChunkNotFoundError()
+    document_title = db_session.scalar(select(KnowledgeDocument.title).where(
+        KnowledgeDocument.id == chunk.document_id, KnowledgeDocument.owner_id == owner_id, KnowledgeDocument.is_deleted == IS_NOT_DELETED,
+    ))
+    if document_title is None:
+        raise KnowledgeChunkNotFoundError()
+    return KnowledgeChunkDetail(
+        chunk_id=chunk.id, knowledge_base_id=chunk.knowledge_base_id, document_id=chunk.document_id,
+        document_title=document_title, chunk_index=chunk.chunk_index, heading_path=chunk.heading_path,
+        char_start=chunk.char_start, char_end=chunk.char_end, content=chunk.content,
+    )
 
 
 # 做什么：校验归属，在同一事务保存原文与切片并标记文档就绪

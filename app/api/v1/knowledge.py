@@ -15,6 +15,20 @@ from app.services import knowledge as knowledge_service
 from app.utils.response import success
 
 router = APIRouter(prefix="/knowledge-bases", tags=["知识库"])
+chunk_router = APIRouter(prefix="/knowledge-chunks", tags=["知识库"])
+
+
+# 做什么：按切片编号返回本人引用所指的原文片段
+# 入参：路径中的切片编号、已登录用户及请求级数据库会话
+# 返回：统一响应；未登录或切片不可见时返回对应错误
+@chunk_router.get("/{chunk_id}", summary="查看本人知识库切片原文")
+def get_knowledge_chunk(
+    chunk_id: int,
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db),
+) -> dict:
+    detail = knowledge_service.get_knowledge_chunk(db_session, current_user.id, chunk_id)
+    return success(detail.model_dump(mode="json"))
 
 
 # 做什么：接收建库请求并返回新库的公开字段
