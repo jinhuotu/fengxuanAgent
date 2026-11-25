@@ -42,6 +42,34 @@ def _paragraph_ranges(content: str) -> Iterator[tuple[int, int]]:
         yield paragraph_start, len(content)
 
 
+# 做什么：按原文顺序合并相邻段落，只延伸字符区间
+# 入参：完整原文，用现有空行规则识别非空段落
+# 返回：每组的起止偏移和首末段号；空白原文不产生分组
+def _paragraph_groups(content: str) -> Iterator[tuple[int, int, int, int]]:
+    paragraphs = enumerate(_paragraph_ranges(content), start=1)
+    first_paragraph = next(paragraphs, None)
+    if first_paragraph is None:
+        return
+
+    first_number, (group_start, group_end) = first_paragraph
+    last_number = first_number
+    for paragraph_number, (paragraph_start, paragraph_end) in paragraphs:
+        current_length = group_end - group_start
+        merged_length = paragraph_end - group_start
+        # 新手注意：分组像延长书签覆盖的范围，段间空行仍留在原文里。
+        can_merge = merged_length <= CHUNK_HARD_MAX and (
+            current_length < CHUNK_MIN_CHARS or merged_length <= CHUNK_TARGET_MAX
+        )
+        # 硬上限优先。即使当前组还短，也必须在会越界时收口。
+        if not can_merge:
+            yield group_start, group_end, first_number, last_number
+            group_start = paragraph_start
+            first_number = paragraph_number
+        group_end = paragraph_end
+        last_number = paragraph_number
+    yield group_start, group_end, first_number, last_number
+
+
 # 做什么：找到指定范围内最靠后的句末或换行后位置
 # 入参：升序排列的句末偏移与两侧边界
 # 返回：最近的句末偏移；没有可用句末时返回 None
@@ -94,8 +122,8 @@ def _split_points(chunk_start: int, paragraph_end: int, sentence_ends: list[int]
     return chunk_end, max(earliest_start, chunk_end - CHUNK_OVERLAP_MAX)
 
 
-# 做什么：把单个段落切成一块或若干有重叠的块
-# 入参：完整原文与当前段的起止偏移
+# 做什么：把指定的原文范围切成一块或若干有重叠的块
+# 入参：完整原文与当前分组的起止偏移
 # 返回：依原文顺序产生块的起止偏移
 def _chunk_ranges(content: str, paragraph_start: int, paragraph_end: int) -> Iterator[tuple[int, int]]:
     # 601 到 719 字无法拆成两个至少 400 字且最多重叠 80 字的块。
@@ -112,15 +140,15 @@ def _chunk_ranges(content: str, paragraph_start: int, paragraph_end: int) -> Ite
     yield chunk_start, paragraph_end
 
 
-# 做什么：为每个段落生成带顺序、章节路径和原文偏移的切片
+# 做什么：合并相邻短段，再按区间生成带顺序和段落标题的切片
 # 入参：文档标题和完整原文
 # 返回：从零编号的切片列表；空内容或纯空白返回空列表
 def split_document(title: str, content: str) -> list[ChunkDraft]:
     chunks: list[ChunkDraft] = []
-    for paragraph_number, paragraph_range in enumerate(_paragraph_ranges(content), start=1):
-        paragraph_start, paragraph_end = paragraph_range
-        heading_path = f"{title} > 第{paragraph_number}段"
-        for char_start, char_end in _chunk_ranges(content, paragraph_start, paragraph_end):
+    for group_start, group_end, first_number, last_number in _paragraph_groups(content):
+        paragraph_label = str(first_number) if first_number == last_number else f"{first_number}-{last_number}"
+        heading_path = f"{title} > 第{paragraph_label}段"
+        for char_start, char_end in _chunk_ranges(content, group_start, group_end):
             # 新手注意：偏移像书签，左端包含、右端不包含，打开原文就能还原这块文字。
             chunks.append(ChunkDraft(len(chunks), heading_path, content[char_start:char_end], char_start, char_end))
     return chunks

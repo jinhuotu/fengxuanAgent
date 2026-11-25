@@ -11,7 +11,7 @@ from tests.test_knowledge import (
 CHUNKS_PATH = "/knowledge-chunks"
 UNKNOWN_CHUNK_ID = 999
 TITLE = "对话引用说明"
-DOCUMENT_CONTENT = "第一节介绍引用。\n\n  第二节保留换行🙂。\n这一行也属于第二节。  "
+DOCUMENT_CONTENT = "第一节介绍引用。" * 80 + "\n\n  第二节保留换行🙂。\n这一行也属于第二节。  "
 
 
 # 做什么：通过现有接口上传文档并取得非零偏移的切片
