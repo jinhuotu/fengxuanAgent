@@ -28,6 +28,7 @@ CODE_ROLE_NOT_FOUND = 2002
 CODE_CANNOT_MODIFY_SELF = 2003
 CODE_LAST_ADMIN_PROTECTED = 2004
 CODE_KNOWLEDGE_BASE_NOT_FOUND = 4001
+CODE_KNOWLEDGE_DOCUMENT_NOT_FOUND = 4002
 CODE_INTERNAL_ERROR = 5000
 
 DEFAULT_HTTP_STATUS = 400
@@ -171,6 +172,15 @@ class KnowledgeBaseNotFoundError(BusinessError):
     code = CODE_KNOWLEDGE_BASE_NOT_FOUND
     http_status = 404
     message = "知识库不存在"
+
+
+# 做什么：统一处理不存在、已删除或不属于指定库和用户的文档
+# 入参：无，使用公开错误文案
+# 返回：抛出后由全局处理器转成 404/4002
+class KnowledgeDocumentNotFoundError(BusinessError):
+    code = CODE_KNOWLEDGE_DOCUMENT_NOT_FOUND
+    http_status = 404
+    message = "知识库文档不存在"
 
 
 # 做什么：把上面这些异常接住，转成统一响应结构

@@ -78,6 +78,34 @@ class KnowledgeDocumentListResponse(BaseModel):
     page_size: int
 
 
+class KnowledgeChunkItem(BaseModel):
+    id: int
+    chunk_index: int
+    heading_path: str
+    char_start: int
+    char_end: int
+    content: str
+
+
+class KnowledgeChunkListResponse(BaseModel):
+    items: list[KnowledgeChunkItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class KnowledgeBaseDeleteResult(BaseModel):
+    id: int
+    deleted_documents: int
+    deleted_chunks: int
+    cleared_sessions: int
+
+
+class KnowledgeDocumentDeleteResult(BaseModel):
+    id: int
+    deleted_chunks: int
+
+
 class KnowledgeChunkSearchRequest(BaseModel):
     query: Annotated[str, StringConstraints(
         strip_whitespace=True, min_length=SEARCH_QUERY_MIN_CHARS, max_length=SEARCH_QUERY_MAX_CHARS

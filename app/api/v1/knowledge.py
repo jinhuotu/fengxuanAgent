@@ -90,3 +90,47 @@ def search_knowledge_chunks(
         db_session, current_user.id, knowledge_base_id, payload
     )
     return success(matches.model_dump(mode="json"))
+
+
+# 做什么：删除当前用户指定的知识库
+# 入参：知识库编号、已登录用户和独立写入会话
+# 返回：统一响应及删除计数；未登录或库不可见时返回对应错误
+@router.delete("/{knowledge_base_id}", summary="删除个人知识库")
+def delete_knowledge_base(
+    knowledge_base_id: int,
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db, use_cache=False),
+) -> dict:
+    result = knowledge_service.delete_knowledge_base(db_session, current_user.id, knowledge_base_id)
+    return success(result.model_dump(mode="json"))
+
+
+# 做什么：删除当前用户指定的知识库文档
+# 入参：知识库编号、文档编号、已登录用户和独立写入会话
+# 返回：统一响应及删除切片数；库或文档不可见时返回对应错误
+@router.delete("/{knowledge_base_id}/documents/{document_id}", summary="删除知识库文档")
+def delete_knowledge_document(
+    knowledge_base_id: int,
+    document_id: int,
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db, use_cache=False),
+) -> dict:
+    result = knowledge_service.delete_knowledge_document(db_session, current_user.id, knowledge_base_id, document_id)
+    return success(result.model_dump(mode="json"))
+
+
+# 做什么：分页返回知识库文档的原文切片
+# 入参：库编号、文档编号、分页参数、已登录用户和数据库会话
+# 返回：统一分页响应；库或文档不可见时返回对应错误
+@router.get("/{knowledge_base_id}/documents/{document_id}/chunks", summary="分页查看文档原文切片")
+def list_knowledge_document_chunks(
+    knowledge_base_id: int,
+    document_id: int,
+    query: KnowledgeBaseListQuery = Depends(),
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db),
+) -> dict:
+    chunks = knowledge_service.list_knowledge_document_chunks(
+        db_session, current_user.id, knowledge_base_id, document_id, query,
+    )
+    return success(chunks.model_dump(mode="json"))
