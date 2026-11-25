@@ -35,6 +35,10 @@ CODE_INTERNAL_ERROR = 5000
 DEFAULT_HTTP_STATUS = 400
 INTERNAL_ERROR_MESSAGE = "服务器内部错误，请稍后重试"
 
+# 这几种错误不写日志：1000 参数校验每次都带用户输入细节，1001~1004 由登录保护与鉴权各自记录，
+# 而且过期令牌属于高频噪声，重复记只会淹没真正的异常。
+CODE_NOT_LOGGED = frozenset({CODE_INVALID_PARAMS, CODE_INVALID_CREDENTIALS, CODE_TOKEN_INVALID, CODE_ACCOUNT_DISABLED, CODE_ACCOUNT_LOCKED})
+
 
 class BusinessError(Exception):
     """业务异常基类。
@@ -198,8 +202,18 @@ class KnowledgeChunkNotFoundError(BusinessError):
 # 返回：无（副作用是给 app 注册三个异常处理器）
 # 为什么三个：业务错误照原样返回给用户；参数校验错误转成可读提示；其余一律 500 且只记日志。
 def register_exception_handlers(app: FastAPI) -> None:
+    logger = logging.getLogger(__name__)
+
     @app.exception_handler(BusinessError)
     async def handle_business_error(request: Request, exc: BusinessError) -> JSONResponse:
+        # 预期内的业务错误也留一条记录，否则用户说"点了没反应"时日志里什么都查不到。
+        # 认证类的 1000~1004 由登录保护各自记录、或属于高频噪声，这里不重复记。
+        if exc.code not in CODE_NOT_LOGGED:
+            logger.info(
+                "业务错误 | %s %s | code=%s | http=%s | user_id=%s",
+                request.method, request.url.path, exc.code, exc.http_status,
+                getattr(request.state, "user_id", "-"),
+            )
         return JSONResponse(
             status_code=exc.http_status,
             content={"code": exc.code, "message": exc.message, "data": None},

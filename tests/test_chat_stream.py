@@ -1,5 +1,6 @@
 """验证流完成、异常和真正的 ASGI 发送断开会持久化正确状态。"""
 import asyncio
+import logging
 from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -71,6 +72,36 @@ def test_upstream_error_preserves_partial_answer(chat_sessions, monkeypatch):
     answer = history_items(chat_sessions, turn.session_id)[1]
     assert answer["status"] == "failed"
     assert answer["content"] == "部分内容"
+
+
+# 做什么：模拟模型异常之外的代码 bug
+# 入参：历史和问题
+# 返回：一个片段后抛普通异常
+async def crashing_model(history, question):
+    yield ModelChunk.model_validate({"choices": [{"delta": {"content": "半句"}}]})
+    raise RuntimeError("内部细节不该进响应")
+
+
+# 做什么：确认模型错误记 WARNING 摘要、代码 bug 记 ERROR 且带堆栈
+# 入参：隔离会话工厂、模拟替换工具和日志捕获
+# 返回：无；级别、错误标识或堆栈缺失时断言失败
+def test_stream_failures_logged_with_level_and_traceback(chat_sessions, monkeypatch, caplog):
+    monkeypatch.setattr(chat_stream, "stream_model", broken_model)
+    with caplog.at_level(logging.WARNING, logger=chat_stream.__name__):
+        asyncio.run(collect_stream(chat_sessions, new_turn(chat_sessions)))
+    model_record = caplog.records[-1]
+    assert model_record.levelno == logging.WARNING
+    assert "模型调用失败" in model_record.getMessage()
+    assert "error_code=model_unavailable" in model_record.getMessage()
+
+    caplog.clear()
+    monkeypatch.setattr(chat_stream, "stream_model", crashing_model)
+    with caplog.at_level(logging.ERROR, logger=chat_stream.__name__):
+        asyncio.run(collect_stream(chat_sessions, new_turn(chat_sessions)))
+    crash_record = caplog.records[-1]
+    assert crash_record.levelno == logging.ERROR
+    assert "RuntimeError" in crash_record.getMessage()
+    assert crash_record.exc_info and crash_record.exc_info[1] is not None
 
 
 # 做什么：模拟浏览器在收到部分回答后断开发送通道

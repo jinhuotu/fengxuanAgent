@@ -8,8 +8,10 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from time import perf_counter
+from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -20,7 +22,7 @@ from app.api.v1.knowledge import chunk_router as knowledge_chunk_router
 from app.api.v1.knowledge import router as knowledge_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
-from app.core.logging import get_logger, setup_logging
+from app.core.logging import bind_request_id, get_logger, release_request_id, setup_logging
 from app.db.session import SessionLocal
 from app.db import session as database_session
 from app.services.chat_recovery import recovery_lifespan
@@ -62,6 +64,34 @@ app.add_middleware(
 
 # 三个全局异常处理器在这里挂上，接口里就不用各自 try/except
 register_exception_handlers(app)
+
+
+# 做什么：给每个请求分配编号、写入响应头，并记录一条访问日志
+# 入参：请求与后续处理链
+# 返回：响应；未带 X-Request-ID 时自动生成，带上后前端报障可直接给这个号
+async def log_requests(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or uuid4().hex[:12]
+    token = bind_request_id(request_id)
+    started_at = perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        # 兜底日志：即使异常处理器没接住，也要留下可定位的一行与堆栈
+        logger.exception("请求异常 | %s %s | elapsed_ms=%.1f", request.method, request.url.path,
+                         (perf_counter() - started_at) * 1000)
+        release_request_id(token)
+        raise
+    response.headers["X-Request-ID"] = request_id
+    # 流式回答在返回响应时正文还没开始发，这一行只代表握手耗时，正文时长看"模型调用结束"。
+    is_stream = response.headers.get("content-type", "").startswith("text/event-stream")
+    logger.info("请求完成 | %s %s | status=%s | elapsed_ms=%.1f | user_id=%s | stream=%s",
+                request.method, request.url.path, response.status_code,
+                (perf_counter() - started_at) * 1000, getattr(request.state, "user_id", "-"), is_stream)
+    release_request_id(token)
+    return response
+
+
+app.middleware("http")(log_requests)
 
 # 认证路由挂在这里：以后每加一组接口，这里只多一行 include_router
 app.include_router(auth_router)

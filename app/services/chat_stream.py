@@ -251,14 +251,16 @@ async def stream_turn(sessions: SessionFactory, turn: PreparedTurn, prewarm_queu
         model_error = ModelTimeoutError() if isinstance(error, TimeoutError) else error
         result.status, result.error_code = MessageStatus.FAILED, model_error.error_code
         error_message = model_error.message
+        log_model_failure(turn, model_error)
     except asyncio.CancelledError:
         result.status = MessageStatus.INTERRUPTED
         raise
     except Exception as error:
         result.status, result.error_code = MessageStatus.FAILED, "generation_failed"
         error_message = "生成失败，请稍后重新发送"
-        logger.error("流式生成异常 | session_id=%s | request_id=%s | error_type=%s",
-                     turn.session_id, turn.request_id, type(error).__name__)
+        # 用 exception 而不是 error：这条属于代码 bug，没有堆栈就只能知道异常类名。
+        logger.exception("流式生成异常 | session_id=%s | request_id=%s | error_type=%s",
+                         turn.session_id, turn.request_id, type(error).__name__)
     finally:
         # 清理和持久化独立收尾，即使上游关闭抛出取消异常，也必须尝试保存正文。
         try:
@@ -267,6 +269,17 @@ async def stream_turn(sessions: SessionFactory, turn: PreparedTurn, prewarm_queu
             saved = await persist_result(sessions, turn, result)
             log_generation(turn, result, started_at)
     yield await final_event(sessions, turn, result, saved, error_message, prewarm_queue)
+
+
+# 做什么：记录一次模型调用失败，按错误分类区分，便于按级别告警
+# 入参：生成请求和已分类的模型业务异常
+# 返回：无；只记录错误标识与状态码，不含上游响应、密钥或问答内容
+def log_model_failure(turn: PreparedTurn, model_error: ModelUnavailableError) -> None:
+    logger.warning(
+        "模型调用失败 | user_id=%s | session_id=%s | request_id=%s | model=%s | error_code=%s | http=%s | error_type=%s",
+        turn.user_id, turn.session_id, turn.request_id, get_settings().llm_model,
+        model_error.error_code, model_error.http_status, type(model_error).__name__,
+    )
 
 
 # 做什么：记录一次生成的安全摘要，不打印问题、回答、凭证或完整上游异常

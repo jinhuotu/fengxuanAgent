@@ -147,3 +147,16 @@ tests/test_chat_partial_save.py 使用 tests/partial_save_worker.py 在专用子
 `e1ea439850fc` 创建 `knowledge_bases`。`f12630e761c9` 新增 `knowledge_documents` 和库内列表索引。
 `e433f3124db0` 新增 `knowledge_chunks`。MySQL 的 ngram 全文索引由迁移创建。
 `af4cfc254421` 为 `chat_sessions` 增加可空的知识库编号。
+
+## 七、日志约定
+
+全项目只用 `app/core/logging.py`：单一 stdout handler、格式 `时间 | 级别 | 模块名 | 请求编号 | 内容`、`dev` 为 DEBUG、`prod` 为 INFO、重复初始化幂等。
+
+请求编号由 `app/main.py::log_requests` 中间件生成（优先用请求头 `X-Request-ID`，否则 12 位随机），写进 `contextvars` 并回写响应头；`RequestIdFormatter` 给每条日志补 `request_id` 列，请求结束后复位，后台任务显示 `-`。每个请求还记一行 `请求完成 | 方法 路径 | status | elapsed_ms | user_id | stream`；流式回答该行只是握手耗时，正文时长看"模型调用结束"。
+
+错误记录按类别分三条线：
+- 业务错误（`BusinessError`）在 `core/errors.py` 记 `INFO`，带 `code`、`http`、`user_id`；`1000~1004` 由登录保护各自记录或属高频噪声，不重复记。
+- 未处理异常记 `ERROR` 并带堆栈，只写 `method`、`path`，不向客户端返回细节；中间件另有兜底 `请求异常`。
+- 模型错误按 `5001~5012` 分类，`chat_stream.py` 记 `WARNING`（`error_code`、`http`、`error_type`），并在"模型调用结束"的 `INFO` 摘要里重复 `status` 与 `error_code`。
+
+安全边界：不记录问题原文、回答正文、切片内容、凭证、上游响应正文；用户名用 `%r`。`tests/test_logging.py` 与 `caplog` 断言钉住"请求编号贯穿、访问日志成形、业务错误留痕、模型失败为 WARNING、流内异常带堆栈"。

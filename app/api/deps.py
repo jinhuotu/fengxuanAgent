@@ -4,7 +4,7 @@
 验签、查库、判断账号状态，全部转交给 services，api 层不碰这些。
 """
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -36,13 +36,17 @@ def get_access_token(
 # 失败：没有 Authorization 头或不是 Bearer 格式 -> TokenInvalidError（401 / 1002）
 # 说明：验签与查库在 service 里，这里只判断"有没有带来凭证"
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db_session: Session = Depends(get_db),
 ) -> UserInfo:
     if credentials is None:
         raise TokenInvalidError()
 
-    return auth_service.resolve_current_user(db_session, credentials.credentials)
+    user = auth_service.resolve_current_user(db_session, credentials.credentials)
+    # 把用户编号落到请求上，访问日志与业务错误日志就能带上"是谁"，不用各自再查库。
+    request.state.user_id = user.id
+    return user
 
 
 # 做什么：将当前用户交给服务检查是否拥有创建用户权限

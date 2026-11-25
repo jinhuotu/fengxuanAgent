@@ -59,8 +59,8 @@ def read_cache(cache_key: str) -> str | None:
         return None
     try:
         return get_cache_client().get(cache_key)
-    except RedisError:
-        logger.warning("缓存读取失败，回源数据库 | cache_key=%s", cache_key)
+    except RedisError as error:
+        logger.warning("缓存读取失败，回源数据库 | cache_key=%s | error_type=%s", cache_key, type(error).__name__)
         return None
 
 
@@ -72,8 +72,8 @@ def write_cache(cache_key: str, content: str, ttl_seconds: int) -> None:
         return
     try:
         get_cache_client().set(cache_key, content, ex=ttl_seconds)
-    except RedisError:
-        logger.warning("缓存写入失败，保留数据库结果 | cache_key=%s", cache_key)
+    except RedisError as error:
+        logger.warning("缓存写入失败，保留数据库结果 | cache_key=%s | error_type=%s", cache_key, type(error).__name__)
 
 
 # 做什么：为一个登录名生成失败计数键和锁定键

@@ -7,14 +7,44 @@
 
 import logging
 import sys
+from contextvars import ContextVar
 
-# 日志格式：时间 | 级别 | 模块名 | 内容。
+# 当前请求编号：中间件写入，日志格式统一读取，一次请求的多条日志靠它串起来。
+# 默认 "-" 表示不是请求内产生的日志（例如启动、关闭、后台任务）。
+REQUEST_ID: ContextVar[str] = ContextVar("request_id", default="-")
+
+# 日志格式：时间 | 级别 | 模块名 | 请求编号 | 内容。
 # 模块名必须留，否则看到"出错了"三个字根本不知道是谁出的错。
-LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
+LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(request_id)s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # 环境到级别的映射：开发看全部细节，生产只看 INFO 以上，避免日志被调试信息淹没
 LOG_LEVEL_BY_ENV = {"dev": logging.DEBUG, "prod": logging.INFO}
+
+
+class RequestIdFormatter(logging.Formatter):
+    """把当前请求编号补进每条日志，业务代码不必各自传参。"""
+
+    # 做什么：先用上下文里的请求编号补齐记录，再交给父类格式化
+    # 入参：logging 产生的日志记录
+    # 返回：格式化后的整行文本
+    def format(self, record: logging.LogRecord) -> str:
+        record.request_id = REQUEST_ID.get()
+        return super().format(record)
+
+
+# 做什么：设置当前请求编号
+# 入参：请求编号
+# 返回：可用于恢复的令牌，请求结束必须 reset
+def bind_request_id(request_id: str):
+    return REQUEST_ID.set(request_id)
+
+
+# 做什么：恢复上一个请求编号，避免后台任务沿用别人的编号
+# 入参：bind_request_id 返回的令牌
+# 返回：无
+def release_request_id(token) -> None:
+    REQUEST_ID.reset(token)
 
 
 # 做什么：初始化全局日志（只做一次，重复调用不会重复挂 handler）
@@ -29,7 +59,7 @@ def setup_logging(app_env: str) -> None:
 
     level = LOG_LEVEL_BY_ENV.get(app_env, logging.INFO)
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
+    handler.setFormatter(RequestIdFormatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
 
     root_logger.addHandler(handler)
     root_logger.setLevel(level)
