@@ -277,29 +277,49 @@ def test_upload_probe_failure_keeps_document_ready(knowledge_sessions, document_
     assert "上传索引自检异常" in caplog.text and "测试探针查询失败" not in caplog.text
 
 
-# 做什么：确认两类删除在数据提交之后各请求一次重建
+# 做什么：确认两类删除在数据提交之后各触发一次索引自检，且不再无条件重建
 # 入参：隔离客户端、数据库会话工厂、请求头、预建库和删除对象
-# 返回：无；事务时序、状态或调用次数不符时断言失败
+# 返回：无；事务时序、状态、自检次数或重建次数不符时断言失败
 @pytest.mark.parametrize("delete_base", [True, False])
-def test_delete_rebuild_runs_after_commit(knowledge_client, knowledge_sessions, owner_headers, document_bases, monkeypatch, delete_base):
+def test_delete_index_check_runs_after_commit(knowledge_client, knowledge_sessions, owner_headers, document_bases, monkeypatch, delete_base):
     document_id = upload_single_chunk(knowledge_client, owner_headers)
 
     # 做什么：用另一条连接读取已提交的软删除标志
-    # 入参：即将重建索引的独立写会话
-    # 返回：模拟重建失败；提交时序或软删除状态不符时断言失败
-    def check_committed_delete(db_session):
+    # 入参：删除后索引自检的独立写会话
+    # 返回：无；提交时序或软删除状态不符时断言失败
+    def check_committed_delete(db_session, owner_id, knowledge_base_id):
         assert not db_session.in_transaction()
         with knowledge_sessions() as query_session:
             assert query_session.get(KnowledgeDocument, document_id).is_deleted == DELETED
             assert query_session.scalar(select(KnowledgeChunk.is_deleted)) == DELETED
-        return False
 
-    rebuild = Mock(side_effect=check_committed_delete)
+    index_check = Mock(side_effect=check_committed_delete)
+    rebuild = Mock()
+    monkeypatch.setattr(knowledge, "_verify_search_index_after_delete", index_check)
     monkeypatch.setattr(knowledge, "rebuild_fulltext_index", rebuild)
     delete_url = BASE_URL if delete_base else f"{DOCUMENT_URL}/{document_id}"
     response = knowledge_client.delete(delete_url, headers=owner_headers)
     assert response.status_code == 200 and response.json()["code"] == 0
-    rebuild.assert_called_once()
+    index_check.assert_called_once()
+    rebuild.assert_not_called()
+
+
+# 做什么：确认非 MySQL 环境删除时不做整表重建，删除本身照常成功
+# 入参：隔离客户端、数据库会话工厂、请求头和预建文档
+# 返回：重建被调用或删除抛错时断言失败
+def test_delete_skips_rebuild_without_mysql(knowledge_client, knowledge_sessions, owner_headers, document_bases, monkeypatch):
+    document_id = upload_single_chunk(knowledge_client, owner_headers)
+
+    # 做什么：把重建替换成会失败的替身，证明删除路径不再依赖它
+    # 入参：会话
+    # 返回：无；被调用时抛出断言错误
+    def refuse_rebuild(_db_session):
+        raise AssertionError("非 MySQL 环境不应重建全文索引")
+
+    monkeypatch.setattr(knowledge, "rebuild_fulltext_index", refuse_rebuild)
+    with knowledge_sessions() as db_session:
+        result = knowledge.delete_knowledge_document(db_session, OWNER_ID, OWNER_BASE_ID, document_id)
+        assert result.deleted_chunks >= 1 and not db_session.in_transaction()
 
 
 # 做什么：核对索引维护通过自动提交连接执行并识别 MySQL 返回状态

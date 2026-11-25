@@ -201,7 +201,7 @@ def delete_knowledge_base(db_session: Session, owner_id: int, knowledge_base_id:
             id=knowledge_base_id, deleted_documents=deleted_documents,
             deleted_chunks=deleted_chunks, cleared_sessions=cleared_sessions,
         )
-    rebuild_fulltext_index(db_session)
+    _verify_search_index_after_delete(db_session, owner_id, knowledge_base_id)
     return result
 
 
@@ -220,7 +220,7 @@ def delete_knowledge_document(
             _owned_chunks_filter(owner_id, knowledge_base_id), KnowledgeChunk.document_id == document_id,
         ).values(is_deleted=SOFT_DELETED)
         result = KnowledgeDocumentDeleteResult(id=document_id, deleted_chunks=db_session.execute(chunk_update).rowcount)
-    rebuild_fulltext_index(db_session)
+    _verify_search_index_after_delete(db_session, owner_id, knowledge_base_id)
     return result
 
 
@@ -357,6 +357,49 @@ def _verify_search_index_after_upload(
             logger.error("文档已就绪但索引未命中，需人工重建 owner_id=%s knowledge_base_id=%s", owner_id, knowledge_base_id)
     except Exception as error:
         logger.warning("上传索引自检异常 owner_id=%s knowledge_base_id=%s error_type=%s",
+                       owner_id, knowledge_base_id, type(error).__name__)
+
+
+# 做什么：删除后确认全文索引仍能命中，只在未命中时重建一次
+# 入参：已提交的写会话、当前用户编号和刚删除的库编号
+# 返回：无；自检异常只记录日志，删除结果不受影响
+def _verify_search_index_after_delete(db_session: Session, owner_id: int, knowledge_base_id: int) -> None:
+    try:
+        if db_session.get_bind().dialect.name != MYSQL_DIALECT:
+            return
+        # 该库删空时改取本人其他有效切片：全文索引是整表级的，用哪一块探针都可以。
+        with db_session.begin():
+            probe_row = db_session.execute(
+                select(KnowledgeChunk.knowledge_base_id, KnowledgeChunk.content).where(
+                    KnowledgeChunk.owner_id == owner_id, KnowledgeChunk.is_deleted == IS_NOT_DELETED,
+                ).order_by(KnowledgeChunk.id).limit(1)
+            ).first()
+        if probe_row is None:
+            logger.info("删除后索引自检跳过 owner_id=%s knowledge_base_id=%s 原因=本人已无有效切片",
+                        owner_id, knowledge_base_id)
+            return
+        probe = probe_row.content.strip()[:INDEX_PROBE_MAX_CHARS]
+        if len(probe) < SEARCH_QUERY_MIN_CHARS:
+            logger.info("删除后索引自检跳过 owner_id=%s knowledge_base_id=%s 原因=探针过短",
+                        owner_id, knowledge_base_id)
+            return
+        probe_base_id = probe_row.knowledge_base_id
+        matches = _count_index_probe_matches(db_session, owner_id, probe_base_id, probe)
+        if not matches:
+            sleep(INDEX_PROBE_RETRY_SECONDS)
+            matches = _count_index_probe_matches(db_session, owner_id, probe_base_id, probe)
+        if matches:
+            # 索引仍可命中就不做整表重建，避免每次删除都锁表。
+            logger.info("删除后索引仍可命中，跳过重建 owner_id=%s knowledge_base_id=%s", owner_id, knowledge_base_id)
+            return
+        rebuild_fulltext_index(db_session)
+        matches = _count_index_probe_matches(db_session, owner_id, probe_base_id, probe)
+        if matches:
+            logger.info("删除后索引未命中并已重建 owner_id=%s knowledge_base_id=%s", owner_id, knowledge_base_id)
+        else:
+            logger.error("删除后索引仍未命中，需人工重建 owner_id=%s knowledge_base_id=%s", owner_id, knowledge_base_id)
+    except Exception as error:
+        logger.warning("删除后索引自检异常 owner_id=%s knowledge_base_id=%s error_type=%s",
                        owner_id, knowledge_base_id, type(error).__name__)
 
 
