@@ -51,11 +51,11 @@ uv run python scripts/seed_rbac.py
 ### scripts/acceptance_stage2.py
 
 - 用途：通过真实 HTTP 验证阶段二的授权、角色变更、停用和启用，输出可粘贴到验收报告的结果。
-- 参数：`--username`（可选，默认 `admin`），指定管理员账号 A。
+- 参数：`--username`（可选，默认 `admin`），指定管理员账号 A；`--password`（可选）A 的密码；`--test-password`（可选）`accept_b` / `accept_c` 的密码。不传密码时从终端 `getpass` 读取。
 - 前置条件：`127.0.0.1:8081` 已运行当前后端并连接项目 MySQL。健康检查、四条指定路由及 A 的 `users:assign_role` 必须通过。A 需持有 `admin` 角色和完整四项权限。
 - 可否重复执行：可以。`accept_b` 和 `accept_c` 已存在时复用，已停用时通过 API 启用。成功跑完会撤销本轮验证用角色并停用两人。中途失败时按表格核对最后完成的步骤和最终状态。
-- 执行方式：在仓库根目录运行 `uv run --no-sync python scripts/acceptance_stage2.py --username admin`。
-- 注意：在真实终端用 `getpass` 输入 A 和两个验收账号的密码。新建验收账号时输入新密码并自行保存，复用时输入原密码。使用专用的 `accept_b`、`accept_c`，脚本会实际改变其角色和状态。脚本通过 API 操作，缺路由或权限时停止。 [报告模板](验收/阶段二.md)
+- 执行方式：在仓库根目录运行 `uv run --no-sync python scripts/acceptance_stage2.py --username admin`；无法打开交互终端时追加 `--password` 与 `--test-password`。
+- 注意：默认在真实终端用 `getpass` 输入 A 和两个验收账号的密码；新建验收账号时输入新密码并自行保存，复用时输入原密码。使用专用的 `accept_b`、`accept_c`，脚本会实际改变其角色和状态。脚本通过 API 操作，缺路由或权限时停止。 [报告模板](验收/阶段二.md)
 
 ### scripts/acceptance_stage3.py
 

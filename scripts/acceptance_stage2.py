@@ -44,12 +44,14 @@ LOGGER = logging.getLogger("acceptance_stage2")
 class CheckFailed(Exception):
     """只承载允许进入报告的诊断，不保留完整响应。"""
 
-# 做什么：读取密码，终端无法隐藏输入时立即停止
-# 入参：给用户展示的密码提示
+# 做什么：读取密码，命令行已给定时直接用，否则从终端隐藏输入
+# 入参：给用户展示的密码提示、命令行可选传入的密码
 # 返回：本次运行的密码；无交互终端、中断或空密码抛检查异常
-def read_password(prompt: str) -> str:
+def read_password(prompt: str, provided: str | None = None) -> str:
+    if provided:
+        return provided
     if not sys.stdin.isatty():
-        raise CheckFailed("需要真实终端通过 getpass 输入密码")
+        raise CheckFailed("需要真实终端通过 getpass 输入密码，或用 --password / --test-password 传入")
     with warnings.catch_warnings():
         warnings.simplefilter("error", GetPassWarning)
         try:
@@ -177,9 +179,9 @@ def row(number: int | str, results: dict[str, bool], operation: str = "", expect
         LOGGER.info("%s | %s | %s | %s | %s", number, operation, expected, "；".join(evidence), conclusion)
 
 # 做什么：依次验证数据库、路由和 A 的角色分配权限
-# 入参：HTTP 客户端、A 的用户名和结果字典
+# 入参：HTTP 客户端、A 的用户名、命令行传入的 A 密码和结果字典
 # 返回：A 的令牌、本人信息及权限集合；任何前置失败即抛异常
-def preflight(client: httpx.Client, username: str, results: dict) -> tuple[str, dict, set[str]]:
+def preflight(client: httpx.Client, username: str, password: str | None, results: dict) -> tuple[str, dict, set[str]]:
     with row("P1", results, "GET /health", "database=ok") as evidence:
         if request(client, "GET", "/health").get("database") != "ok":
             raise CheckFailed("数据库状态不是 ok")
@@ -197,7 +199,7 @@ def preflight(client: httpx.Client, username: str, results: dict) -> tuple[str, 
             raise CheckFailed("缺少 " + "、".join(missing))
         evidence.append("四条路由和方法均存在")
     with row("P3", results, "A 登录并查权限", ASSIGN_PERMISSION) as evidence:
-        token = login(client, username, read_password("A 的密码："))
+        token = login(client, username, read_password("A 的密码：", password))
         identity = request(client, "GET", "/auth/me", token)
         permissions = request(client, "GET", "/auth/me/permissions", token).get("permissions")
         if not isinstance(permissions, list) or ASSIGN_PERMISSION not in permissions:
@@ -206,9 +208,11 @@ def preflight(client: httpx.Client, username: str, results: dict) -> tuple[str, 
     return token, identity, {permission for permission in permissions if isinstance(permission, str)}
 
 # 做什么：复用或创建 B、C，必要时启用并核对来源和属性
-# 入参：HTTP 客户端、A 令牌、已验证的 A 身份、待填的账号 ID 和步骤证据
-# 返回：两份交互输入的账号密码；任何账号不符合预期即抛异常
-def prepare_users(client: httpx.Client, token: str, identity: dict, ids: dict, evidence: list[str]) -> dict[str, str]:
+# 入参：HTTP 客户端、A 令牌、已验证的 A 身份、待填的账号 ID、命令行传入的测试账号密码和步骤证据
+# 返回：两份账号密码；任何账号不符合预期即抛异常
+def prepare_users(
+    client: httpx.Client, token: str, identity: dict, ids: dict, evidence: list[str], test_password: str | None,
+) -> dict[str, str]:
     names = set(TEST_USERS)
     users = find_users(client, token, names | {identity["username"]})
     operator = users.get(identity["username"], {})
@@ -220,7 +224,7 @@ def prepare_users(client: httpx.Client, token: str, identity: dict, ids: dict, e
     passwords = {}
     for name in TEST_USERS:
         account_kind = "已有账号" if name in users else "新账号"
-        passwords[name] = read_password(f"{name} 密码（{account_kind}）：")
+        passwords[name] = read_password(f"{name} 密码（{account_kind}）：", test_password)
     for name in TEST_USERS:
         if name not in users:
             created = request(client, "POST", "/users", token, payload={"username": name, "password": passwords[name]})
@@ -321,9 +325,12 @@ def cleanup(client: httpx.Client, token: str, ids: dict, results: dict) -> None:
         return  # row 已报告，汇总保留非通过结论。
 
 # 做什么：执行依赖顺序，失败后只做允许的收尾
-# 入参：HTTP 客户端、A 的令牌与身份、许可集合和结果字典
+# 入参：HTTP 客户端、A 的令牌与身份、许可集合、测试账号密码和结果字典
 # 返回：无；失败和未执行步骤留给汇总处理
-def run_checks(client: httpx.Client, token: str, identity: dict, permissions: set[str], results: dict) -> None:
+def run_checks(
+    client: httpx.Client, token: str, identity: dict, permissions: set[str], results: dict,
+    test_password: str | None = None,
+) -> None:
     ids = {}
     try:
         with row(1, results) as evidence:
@@ -337,7 +344,7 @@ def run_checks(client: httpx.Client, token: str, identity: dict, permissions: se
             if not PERMISSIONS <= permissions:
                 raise CheckFailed("未取得全部四个权限码")
         with row(2, results) as evidence:
-            passwords = prepare_users(client, token, identity, ids, evidence)
+            passwords = prepare_users(client, token, identity, ids, evidence, test_password)
         b_token = verify_roles(client, token, ids, passwords, results)
         verify_status(client, token, b_token, ids, passwords[TEST_USERS[0]], results)
         with row(12, results) as evidence:
@@ -365,12 +372,15 @@ def summarize(results: dict) -> int:
     return int(failed > 0)
 
 # 做什么：读取启动参数，执行前置和真实 HTTP 自检
-# 入参：可选 --username，密码只从本机终端读取
+# 入参：可选 --username、--password、--test-password；不传密码时从终端读取
 # 返回：全部通过 0，必过项失败 1，前置不满足 2
 def main() -> int:
     parser = argparse.ArgumentParser(description="阶段二真实 HTTP 自检")
     parser.add_argument("--username", default="admin", help="账号 A 的用户名，默认 admin")
-    username = parser.parse_args().username
+    parser.add_argument("--password", help="账号 A 的密码；不传则从终端输入")
+    parser.add_argument("--test-password", help="accept_b / accept_c 的密码；不传则从终端输入")
+    arguments = parser.parse_args()
+    username = arguments.username
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     if username.casefold() in TEST_USERS:
@@ -380,11 +390,11 @@ def main() -> int:
     LOGGER.info("序号 | 操作 | 期望 | 实际 | 结论")
     with httpx.Client(base_url=BASE_URL, timeout=TIMEOUT_SECONDS, trust_env=False) as client:
         try:
-            token, identity, permissions = preflight(client, username, results)
+            token, identity, permissions = preflight(client, username, arguments.password, results)
         except (CheckFailed, KeyboardInterrupt):
             LOGGER.info("前置自检未通过，退出码 2")
             return 2
-        run_checks(client, token, identity, permissions, results)
+        run_checks(client, token, identity, permissions, results, arguments.test_password)
     return summarize(results)
 
 
