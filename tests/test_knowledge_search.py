@@ -105,7 +105,7 @@ def test_search_returns_public_chunk_fields(knowledge_client, owner_headers, doc
     search_stub.return_value = [chunk]
     response = knowledge_client.post(SEARCH_URL, json={"query": f"  {SEARCH_TERM}\t"}, headers=owner_headers)
     assert response.status_code == 200
-    assert response.json() == {"code": 0, "message": "成功", "data": {"items": [chunk]}}
+    assert response.json() == {"code": 0, "message": "成功", "data": {"items": [chunk], "candidates": 1, "dropped": 0}}
     assert search_stub.call_args.args[1:] == (OWNER_ID, OWNER_BASE_ID, SEARCH_TERM, 5)
 
 
@@ -117,7 +117,7 @@ def test_search_returns_empty_items_without_matches(knowledge_client, owner_head
     payload = {"query": f" {search_term} ", "top_k": 20}
     response = knowledge_client.post(SEARCH_URL, json=payload, headers=owner_headers)
     assert response.status_code == 200
-    assert response.json() == {"code": 0, "message": "成功", "data": {"items": []}}
+    assert response.json() == {"code": 0, "message": "成功", "data": {"items": [], "candidates": 0, "dropped": 0}}
     assert search_stub.call_args.args[1:] == (OWNER_ID, OWNER_BASE_ID, search_term, 20)
 
 
@@ -140,7 +140,7 @@ def test_search_discards_shared_bigram_noise(knowledge_client, owner_headers, do
     search_stub.return_value = [relevant, noise]
     response = knowledge_client.post(SEARCH_URL, json={"query": "会话锁"}, headers=owner_headers)
     assert response.status_code == 200
-    assert response.json() == {"code": 0, "message": "成功", "data": {"items": [relevant]}}
+    assert response.json() == {"code": 0, "message": "成功", "data": {"items": [relevant], "candidates": 2, "dropped": 1}}
     assert search_stub.call_args.kwargs == {"candidate_limit": 15}
 
 
@@ -154,7 +154,7 @@ def test_search_returns_empty_items_below_absolute_floor(
     search_stub.return_value = [_scored_chunk(1, SEARCH_TERM, 1.32e-08), _scored_chunk(2, "资料", 0.01)]
     response = knowledge_client.post(SEARCH_URL, json={"query": SEARCH_TERM}, headers=owner_headers)
     assert response.status_code == 200
-    assert response.json() == {"code": 0, "message": "成功", "data": {"items": []}}
+    assert response.json() == {"code": 0, "message": "成功", "data": {"items": [], "candidates": 2, "dropped": 2}}
 
 
 # 做什么：验证 SQL 候选数的最小值和最大值，结果仍按 top_k 截断
@@ -169,3 +169,29 @@ def test_search_bounds_candidate_limit(
     assert response.status_code == 200
     assert response.json()["data"]["items"] == search_stub.return_value[:top_k]
     assert search_stub.call_args.kwargs == {"candidate_limit": candidate_limit}
+
+
+# 做什么：核对部分保留、全丢弃、零候选和 top_k 截断的接口计数不变量
+# 入参：隔离客户端、本人库、搜索替身及预设候选和阈值
+# 返回：无；返回内容、候选数、丢弃数或查询次数不符时断言失败
+@pytest.mark.parametrize(("scores", "absolute_floor", "top_k", "kept_count"), [
+    ((2.17, 0.54), 0.0, 5, 1),
+    ((0.02, 0.01), 0.05, 5, 0),
+    ((), 0.0, 5, 0),
+    ((1.0, 1.0, 1.0), 0.0, 2, 2),
+])
+def test_search_candidate_counts_balance(
+    knowledge_client, owner_headers, document_bases, search_stub, monkeypatch,
+    scores, absolute_floor, top_k, kept_count,
+) -> None:
+    monkeypatch.setattr(get_settings(), "search_min_score_absolute", absolute_floor)
+    candidates = [_scored_chunk(index, SEARCH_TERM, score) for index, score in enumerate(scores, 1)]
+    search_stub.return_value = candidates
+    response = knowledge_client.post(SEARCH_URL, json={"query": SEARCH_TERM, "top_k": top_k}, headers=owner_headers)
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert result["items"] == candidates[:kept_count]
+    assert result["candidates"] == len(candidates)
+    assert result["dropped"] == len(candidates) - kept_count
+    assert result["candidates"] == len(result["items"]) + result["dropped"]
+    search_stub.assert_called_once()
