@@ -142,6 +142,8 @@ tests/test_chat_partial_save.py 使用 tests/partial_save_worker.py 在专用子
 输入预算先扣除系统提示词、原问题和当轮资料，再选择历史。资料只进入当前 user 消息。
 入选资料通过 `references` 事件发送引用元数据，位于可选的 `context` 之后及首个 `delta` 之前。
 
+`GET /knowledge-chunks/{chunk_id}` 供对话引用读取正文与原文偏移。按切片编号定位，分别校验切片和所属文档的归属及软删除状态。任一不可见时返回 `404/4003`。
+
 `e1ea439850fc` 创建 `knowledge_bases`。`f12630e761c9` 新增 `knowledge_documents` 和库内列表索引。
 `e433f3124db0` 新增 `knowledge_chunks`。MySQL 的 ngram 全文索引由迁移创建。
 `af4cfc254421` 为 `chat_sessions` 增加可空的知识库编号。
