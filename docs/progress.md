@@ -109,3 +109,6 @@
 - 日期：2026-11-24。
 - 决定：阶段三接入对话。会话级手选库（`chat_sessions.knowledge_base_id` + `PUT /chat/sessions/{id}/knowledge-base`）；提问时在 `model_events` 做一次检索（800ms 超时、失败降级为空引用），资料块只拼进当前 user 消息，SSE 新增 `references` 事件；预算顺序为系统提示词与当前问题 → 资料（上限 8000 字节）→ 剩余给历史。
 - 原因：资料不进 system 是为保住前缀缓存并避免资料内文字被当成系统指令；检索放旁路，超时或数据库异常不许拖垮对话。全量回归 276 项通过（原 261 项 + 新增 15 项），迁移 `af4cfc254421` 在真实库升级、回退、再升级均通过，开发库实测检索 15ms、命中 1 条、资料块 567 字节。注意：前端 `chatStream.ts` 的 `validatedEvent` 对未知事件直接抛错，`references` 需前端同步补分支，否则选库后对话会在前端报协议错误。
+- 日期：2026-11-25。
+- 决定：阶段三补齐删除与查看原文。新增 DELETE /knowledge-bases/{id}、DELETE /knowledge-bases/{id}/documents/{doc_id}、GET /knowledge-bases/{id}/documents/{doc_id}/chunks；库、文档、切片同事务软删除，并清掉指向已删库的会话选库（cleared_sessions）；删除提交后按 MySQL 方言重建 knowledge_chunks 全文索引；上传提交后自检检索是否命中，未命中先等待 0.2 秒重试，仍为空则重建并复检一次，最后记 ERROR 且不影响上传结果。
+- 原因：开发库实测过全文索引只把词条留在内存缓存、磁盘索引零词条的状态，表现为"库里有数据但检索静默返回 0 命中且不报错"，OPTIMIZE TABLE 后立即恢复；删除与上传正好是索引最容易落后的两个时机，各放一道守卫。真实 HTTP 自证：139 字文档切成 1 块（0–139），删除前检索命中 1 条、删除后 0 条，切片列表与二次删除均返回 404；上传自检日志为"上传索引自检命中 ... 命中条数=1"。全量回归 297 项通过（原 276 项 + 新增 21 项），lembic current 仍为 f4cfc254421，本刀无新迁移。
