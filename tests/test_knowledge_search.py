@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy.dialects import mysql
 
+from app.core.config import get_settings
 from app.rag import retrieval
 from tests.test_knowledge import (
     DELETED_BASE_ID,
@@ -118,3 +119,53 @@ def test_search_returns_empty_items_without_matches(knowledge_client, owner_head
     assert response.status_code == 200
     assert response.json() == {"code": 0, "message": "成功", "data": {"items": []}}
     assert search_stub.call_args.args[1:] == (OWNER_ID, OWNER_BASE_ID, search_term, 20)
+
+
+# 做什么：构造具有真实偏移和评分的候选行
+# 入参：切片编号、正文和全文得分
+# 返回：搜索接口所需的一条完整候选记录
+def _scored_chunk(chunk_id: int, content: str, score: float) -> dict:
+    return {
+        "chunk_id": chunk_id, "document_id": chunk_id, "heading_path": "资料 > 第1段",
+        "content": content, "char_start": 0, "char_end": len(content), "score": score,
+    }
+
+
+# 做什么：验证默认阈值会排除仅共享一个二元组的候选
+# 入参：隔离客户端、本人库及返回两条模拟候选的搜索替身
+# 返回：无；噪声仍返回或 SQL 未多取候选时断言失败
+def test_search_discards_shared_bigram_noise(knowledge_client, owner_headers, document_bases, search_stub) -> None:
+    relevant = _scored_chunk(1, "会话锁保护生成占用", 2.17)
+    noise = _scored_chunk(2, "会话列表展示最近记录", 0.54)
+    search_stub.return_value = [relevant, noise]
+    response = knowledge_client.post(SEARCH_URL, json={"query": "会话锁"}, headers=owner_headers)
+    assert response.status_code == 200
+    assert response.json() == {"code": 0, "message": "成功", "data": {"items": [relevant]}}
+    assert search_stub.call_args.kwargs == {"candidate_limit": 15}
+
+
+# 做什么：确认每条候选低于显式绝对下限时仍返回成功
+# 入参：隔离客户端、本人库、低分候选和配置替身
+# 返回：无；未返回 200 和空 items 时断言失败
+def test_search_returns_empty_items_below_absolute_floor(
+    knowledge_client, owner_headers, document_bases, search_stub, monkeypatch,
+) -> None:
+    monkeypatch.setattr(get_settings(), "search_min_score_absolute", 0.05)
+    search_stub.return_value = [_scored_chunk(1, SEARCH_TERM, 1.32e-08), _scored_chunk(2, "资料", 0.01)]
+    response = knowledge_client.post(SEARCH_URL, json={"query": SEARCH_TERM}, headers=owner_headers)
+    assert response.status_code == 200
+    assert response.json() == {"code": 0, "message": "成功", "data": {"items": []}}
+
+
+# 做什么：验证 SQL 候选数的最小值和最大值，结果仍按 top_k 截断
+# 入参：隔离客户端、本人库、搜索替身及请求与候选条数
+# 返回：无；候选边界或接口条数不符时断言失败
+@pytest.mark.parametrize(("top_k", "candidate_limit"), [(1, 10), (20, 40)])
+def test_search_bounds_candidate_limit(
+    knowledge_client, owner_headers, document_bases, search_stub, top_k, candidate_limit,
+) -> None:
+    search_stub.return_value = [_scored_chunk(index, SEARCH_TERM, 1.0) for index in range(candidate_limit)]
+    response = knowledge_client.post(SEARCH_URL, json={"query": SEARCH_TERM, "top_k": top_k}, headers=owner_headers)
+    assert response.status_code == 200
+    assert response.json()["data"]["items"] == search_stub.return_value[:top_k]
+    assert search_stub.call_args.kwargs == {"candidate_limit": candidate_limit}

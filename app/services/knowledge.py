@@ -371,8 +371,8 @@ def search_knowledge_chunks(
     db_session: Session, owner_id: int, knowledge_base_id: int, payload: KnowledgeChunkSearchRequest
 ) -> KnowledgeChunkSearchResponse:
     _require_owned_knowledge_base(db_session, owner_id, knowledge_base_id)
-    chunk_rows = retrieval.search_chunks(
+    result = retrieval.search_relevant_chunks(
         db_session, owner_id, knowledge_base_id, payload.query, payload.top_k
     )
-    items = [KnowledgeChunkSearchItem.model_validate(chunk_row) for chunk_row in chunk_rows]
+    items = [KnowledgeChunkSearchItem.model_validate(chunk_row) for chunk_row in result.hits]
     return KnowledgeChunkSearchResponse(items=items)

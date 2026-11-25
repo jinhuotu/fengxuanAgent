@@ -230,10 +230,32 @@ def test_selected_base_sends_references_before_first_delta(
     assert search_stub.call_args.args[1:] == (OWNER_ID, OWN_BASE_ID, QUESTION, 5)
 
 
+# 做什么：验证低相关候选退出引用和模型提示词，日志保留统计
+# 入参：隔离客户端、搜索替身、模拟模型收集器及日志捕获器
+# 返回：无；噪声进入引用、模型或日志时断言失败
+def test_low_relevance_chunk_stays_out_of_prompt(rag_client, search_stub, recorded_generation, caplog):
+    relevant = search_stub.return_value[0]
+    noise_content = "噪声切片只共享一个二元组"
+    noise = {**relevant, "chunk_id": relevant["chunk_id"] + 1, "content": noise_content, "score": 0.01}
+    search_stub.return_value = [relevant, noise]
+    session_id = new_session(rag_client)["id"]
+    assert select_base(rag_client, session_id, OWN_BASE_ID).status_code == 200
+    with caplog.at_level(logging.INFO):
+        events = dict(submit_question(rag_client, session_id))
+    assert events["references"] == {"items": [REFERENCE]}
+    plans, model_messages = recorded_generation
+    assert REFERENCE_CONTENT in plans[0].reference_block
+    assert noise_content not in model_messages[0][-1]["content"]
+    assert search_stub.call_args.kwargs == {"candidate_limit": 15}
+    assert "候选=2 | 保留=1 | 丢弃=1" in caplog.text
+    assert "hit_count=1 | kept_count=1 | dropped=1" in caplog.text
+    assert noise_content not in caplog.text and REFERENCE_CONTENT not in caplog.text
+
+
 # 做什么：模拟超过默认等待上限的同步查询
 # 入参：任意标准检索参数，替身不执行数据库查询
 # 返回：等待结束后的空命中
-def slow_search(db_session, owner_id, knowledge_base_id, question, top_k):
+def slow_search(db_session, owner_id, knowledge_base_id, question, top_k, *, candidate_limit=None):
     sleep(0.95)
     return []
 

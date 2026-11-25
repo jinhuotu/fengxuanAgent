@@ -202,9 +202,9 @@ def log_references(turn: PreparedTurn, bundle: ReferenceBundle) -> None:
     block_bytes = len(bundle.block.encode("utf-8"))
     logger.log(
         log_level, "知识库检索 | session_id=%s | knowledge_base_id=%s | hit_count=%s | kept_count=%s | "
-        "block_bytes=%s | elapsed_ms=%.1f | degraded=%s | reason=%s",
+        "dropped=%s | block_bytes=%s | elapsed_ms=%.1f | degraded=%s | reason=%s",
         turn.session_id, turn.knowledge_base_id, bundle.hit_count, len(bundle.items),
-        block_bytes, bundle.elapsed_ms, degraded, bundle.reason,
+        bundle.dropped, block_bytes, bundle.elapsed_ms, degraded, bundle.reason,
     )
 
 

@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any, Literal, TypedDict
 
-from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
@@ -36,6 +35,7 @@ class ReferenceBundle:
     hit_count: int = 0
     elapsed_ms: float = 0
     reason: Literal["no_selection", "empty", "timeout", "db_error"] | None = None
+    dropped: int = 0
 
 
 # 做什么：按命中顺序加入预算内的完整切片，生成资料和引用元数据
@@ -75,12 +75,12 @@ def compose_question(block_text: str, question: str) -> str:
 
 # 做什么：在线程自己的短会话里执行一次切片查询
 # 入参：会话工厂、当前用户编号、已选库编号和原问题
-# 返回：可在会话关闭后使用的行映射；异常交给等待方降级
+# 返回：筛选后的命中及丢弃数；异常交给等待方降级
 def _fetch_reference_hits(
     sessions: sessionmaker[Session], owner_id: int, knowledge_base_id: int, question: str
-) -> Sequence[RowMapping]:
+) -> retrieval.RelevantSearchResult:
     with sessions() as db_session:
-        return retrieval.search_chunks(db_session, owner_id, knowledge_base_id, question, RAG_TOP_K)
+        return retrieval.search_relevant_chunks(db_session, owner_id, knowledge_base_id, question, RAG_TOP_K)
 
 
 # 做什么：算出本轮资料块在总预算内最多还能占多少字节
@@ -102,7 +102,7 @@ async def collect_references(
     started_at = monotonic()
     try:
         # 新手注意：超时像停止等回电，已发出的同步查询仍由自己的线程收尾并关会话。
-        hits = await asyncio.wait_for(
+        result = await asyncio.wait_for(
             asyncio.to_thread(_fetch_reference_hits, sessions, owner_id, knowledge_base_id, question),
             timeout=settings.chat_rag_timeout_ms / MILLISECONDS_PER_SECOND,
         )
@@ -111,8 +111,9 @@ async def collect_references(
     except Exception:
         return ReferenceBundle(elapsed_ms=(monotonic() - started_at) * MILLISECONDS_PER_SECOND, reason="db_error")
     block_budget = _reference_budget(question, settings.chat_rag_token_budget)
-    block, kept_items = build_reference_block(hits, block_budget)
+    block, kept_items = build_reference_block(result.hits, block_budget)
     return ReferenceBundle(
-        block=block, items=kept_items, hit_count=len(hits), reason=None if kept_items else "empty",
+        block=block, items=kept_items, hit_count=len(result.hits), reason=None if kept_items else "empty",
+        dropped=result.dropped,
         elapsed_ms=(monotonic() - started_at) * MILLISECONDS_PER_SECOND,
     )

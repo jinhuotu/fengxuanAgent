@@ -48,14 +48,15 @@ def upload_single_chunk(client, headers, base_id=OWNER_BASE_ID) -> int:
 # 做什么：用 SQLite 读取与全文检索相同归属和软删除范围内的测试片段
 # 入参：搜索使用的会话、用户、库、关键词和条数
 # 返回：测试命中记录；仅替换 MySQL 的关键词匹配与评分
-def search_in_sqlite(db_session, owner_id, base_id, query, top_k):
+def search_in_sqlite(db_session, owner_id, base_id, query, top_k, *, candidate_limit=None):
+    row_limit = top_k if candidate_limit is None else candidate_limit
     chunk_query = select(
         KnowledgeChunk.id.label("chunk_id"), KnowledgeChunk.document_id, KnowledgeChunk.heading_path,
         KnowledgeChunk.content, KnowledgeChunk.char_start, KnowledgeChunk.char_end,
     ).where(
         KnowledgeChunk.owner_id == owner_id, KnowledgeChunk.knowledge_base_id == base_id,
         KnowledgeChunk.is_deleted == 0, KnowledgeChunk.content.contains(query),
-    ).order_by(KnowledgeChunk.id).limit(top_k)
+    ).order_by(KnowledgeChunk.id).limit(row_limit)
     return [{**chunk, "score": 1.0} for chunk in db_session.execute(chunk_query).mappings()]
 
 

@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     chat_context_safety_tokens: int = Field(default=512, ge=0)
     chat_rag_token_budget: int = Field(default=8000, ge=0)
     chat_rag_timeout_ms: int = Field(default=800, gt=0)
+    # SEARCH_MIN_SCORE_RATIO：低于本次最高分一半的候选默认不进入结果。
+    search_min_score_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+    # SEARCH_MIN_SCORE_ABSOLUTE：默认停用绝对下限，保留小语料中的真实低分命中。
+    search_min_score_absolute: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    # SEARCH_CANDIDATE_MULTIPLIER：先按目标条数的倍数多取一批，再做过滤。
+    search_candidate_multiplier: int = Field(default=3, ge=1)
+    # SEARCH_CANDIDATE_MAX：限制单次读取量，给对话检索的时限预留余量。
+    search_candidate_max: int = Field(default=40, ge=1, le=100)
     chat_prewarm_enabled: bool = True
     chat_prewarm_queue_capacity: int = Field(default=20, ge=1, le=1000)
     chat_prewarm_workers: int = Field(default=2, ge=1, le=8)
