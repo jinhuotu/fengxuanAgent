@@ -2,7 +2,14 @@
 import pytest
 
 from app.core.config import Settings
-from app.rag.relevance import select_relevant_hits
+from app.rag.relevance import extract_probe_terms, select_relevant_hits
+
+LEARNING_RATE_CANDIDATES = [
+    {"score": 12.79, "content": "训练参数中可以设置学习率。"},
+    {"score": 9.87, "content": "检查训练过程中的学习率。"},
+    {"score": 7.62, "content": "机器学习训练可以编排多个任务。"},
+    {"score": 6.815, "content": "学习率（Learning Rate）：决定了模型每次更新时权重改变的幅度。"},
+]
 
 
 # 做什么：覆盖单行、二元组噪声、相近分数与两种阈值的边界
@@ -53,3 +60,37 @@ def test_relevance_settings_read_environment(monkeypatch) -> None:
     assert settings.search_min_score_absolute == 0.01
     assert settings.search_candidate_multiplier == 4
     assert settings.search_candidate_max == 35
+
+
+# 做什么：用开发库的四条分数核对探针排序和最终截断
+# 入参：带正文的学习率候选及相对阈值 0.5
+# 返回：无；条数、顺序或截断结果变化时断言失败
+def test_probe_prioritizes_exact_matches_without_dropping_hits() -> None:
+    hits = select_relevant_hits(LEARNING_RATE_CANDIDATES, 5, 0.5, 0.0, probe="学习率")
+    assert len(hits) == 4
+    assert [hit["score"] for hit in hits] == [12.79, 9.87, 6.815, 7.62]
+    limited_hits = select_relevant_hits(LEARNING_RATE_CANDIDATES, 3, 0.5, 0.0, probe="学习率")
+    assert limited_hits == hits[:3]
+
+
+# 做什么：核对空探针与省略探针都会原样保留过滤后的顺序
+# 入参：相同的一组学习率候选
+# 返回：无；两种调用的保留条数、内容或顺序不一致时断言失败
+def test_empty_probe_preserves_original_order() -> None:
+    without_probe = select_relevant_hits(LEARNING_RATE_CANDIDATES, 5, 0.5, 0.0)
+    with_empty_probe = select_relevant_hits(LEARNING_RATE_CANDIDATES, 5, 0.5, 0.0, probe="")
+    assert with_empty_probe == without_probe == LEARNING_RATE_CANDIDATES
+
+
+# 做什么：核对常见问法剥离和空探针保护
+# 入参：用户问句与预期探针词
+# 返回：无；剥离结果不一致时断言失败
+@pytest.mark.parametrize(("query", "expected_probe"), [
+    ("什么是学习率", "学习率"),
+    ("后端项目地址是什么", "后端项目地址"),
+    ("如何", ""),
+    ("", ""),
+    ("　（解释一下：学习率是什么意思？） ", "学习率"),
+])
+def test_extract_probe_terms(query: str, expected_probe: str) -> None:
+    assert extract_probe_terms(query) == expected_probe
