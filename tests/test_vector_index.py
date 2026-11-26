@@ -120,20 +120,22 @@ def test_delete_document_removes_points(sessions, memory_qdrant):
 # 入参：隔离会话、内存客户端和 monkeypatch
 # 返回：返回不可见切片时失败
 def test_vector_mode_drops_stale_and_deleted_chunks(sessions, memory_qdrant, monkeypatch: pytest.MonkeyPatch):
-    chunk_ids = seed_chunks(sessions, OWNER_ID, 1, ("学习率是步长控制参数。", "MySQL 使用全文索引。"))
+    # 三条假向量都高于回答下限，确保命中差异来自回库校验。
+    query = "学习率是步长"
+    chunk_ids = seed_chunks(sessions, OWNER_ID, 1, ("学习率是步长控制参数。", "学习率是步长指标。"))
     with sessions() as db:
         vector_index.sync_document(db, 1, OWNER_ID, 1)
         db.execute(update(KnowledgeChunk).where(KnowledgeChunk.id == chunk_ids[1]).values(is_deleted=1))
         db.commit()
     # 手工写入一条数据库中不存在的陈旧点
     memory_qdrant.upsert(get_settings().qdrant_collection, points=[
-        vector_index.models.PointStruct(id=999, vector=fake_vector("学习率"), payload={
+        vector_index.models.PointStruct(id=999, vector=fake_vector(query), payload={
             "owner_id": OWNER_ID, "knowledge_base_id": 1, "document_id": 1, "chunk_index": 0,
         }),
     ])
     monkeypatch.setattr(get_settings(), "vector_retrieval_mode", "vector")
     with sessions() as db:
-        result = retrieval.search_relevant_chunks(db, OWNER_ID, 1, "学习率怎么调", 3)
+        result = retrieval.search_relevant_chunks(db, OWNER_ID, 1, query, 3)
     assert [hit["chunk_id"] for hit in result.hits] == [chunk_ids[0]]
 
 

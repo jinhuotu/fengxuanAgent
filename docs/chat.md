@@ -256,6 +256,7 @@ storage 中的登录键变化或 clear、可见/焦点校准发现 token 变化�
 | tests/test_chat_prewarm.py、前端 tests/chat-history-sync.test.mjs | 预热与完成响应解耦、有界执行、生命周期及立即追问竞争 |
 | tests/test_chat_*.py、test_llm_client.py、mysql_chat_checks.py | 接口、状态、缓存、真实断线和独立 MySQL 验证 |
 | tests/smoke_support.py、test_smoke_vector.py、test_smoke_app.py | 连真实 Qdrant、MySQL 隔离库和外部模型的冒烟测试及公用准备代码，带 smoke 标记、默认不跑 |
+| tests/test_smoke_answer_floor.py | 以八篇项目文档验证混合检索余弦下限以及库内、库外问题的命中率，带 smoke 标记、默认不跑 |
 | 前端 tests/chat-*.test.mjs、package.json | 无新依赖的流解码和真实交互模块测试 |
 | 两端 docs/architecture.md、progress.md、commands.md | 架构、进度和命令同步 |
 

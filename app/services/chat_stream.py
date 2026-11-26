@@ -176,13 +176,14 @@ async def model_events(sessions: SessionFactory, turn: PreparedTurn, result: Tur
     if turn.knowledge_base_id is not None:
         bundle = await collect_references(sessions, turn.user_id, turn.knowledge_base_id, turn.content)
     log_references(turn, bundle)
-    plan = await run_in_threadpool(load_context_plan, sessions, turn, bundle.block)
+    plan = await run_in_threadpool(load_context_plan, sessions, turn, bundle)
     if plan.history_truncated:
         yield encode_event("context", context_notice(plan))
     if bundle.items:
         result.references = list(bundle.items)
         yield encode_event("references", {"items": bundle.items})
-    iterator = stream_model(plan.messages, compose_question(bundle.block, turn.content))
+    question = compose_question(bundle.block, turn.content, reason=bundle.reason)
+    iterator = stream_model(plan.messages, question)
     events = pump_chunks(sessions, turn, iterator, result)
     try:
         async for event in events:

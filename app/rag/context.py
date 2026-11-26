@@ -19,7 +19,9 @@ REFERENCE_PREFIX = (
     "一句话用了多条资料可连写，如 [1][3]。没有依据任何资料就不要标注，禁止编造不存在的编号。\n\n"
 )
 QUESTION_PREFIX = "\n\n我的问题：\n"
+EMPTY_REFERENCE_NOTICE = "本次在所选知识库中没有检索到相关资料。"
 MILLISECONDS_PER_SECOND = 1000
+ReferenceReason = Literal["no_selection", "empty", "timeout", "db_error"]
 
 
 class ReferenceItem(TypedDict):
@@ -38,7 +40,7 @@ class ReferenceBundle:
     items: list[ReferenceItem] = field(default_factory=list)
     hit_count: int = 0
     elapsed_ms: float = 0
-    reason: Literal["no_selection", "empty", "timeout", "db_error"] | None = None
+    reason: ReferenceReason | None = None
     dropped: int = 0
 
 
@@ -68,13 +70,15 @@ def build_reference_block(
     return "".join(parts), kept_items
 
 
-# 做什么：把参考资料放在本轮用户问题之前
-# 入参：已拼好的资料块和原问题
-# 返回：有资料时返回带边界的消息；资料为空时原样返回问题
-def compose_question(block_text: str, question: str) -> str:
-    if not block_text:
-        return question
-    return f"{REFERENCE_PREFIX}{block_text}{QUESTION_PREFIX}{question}"
+# 做什么：把参考资料或确实零命中的提示放在本轮用户问题之前
+# 入参：已拼好的资料块、原问题和可选的空资料原因
+# 返回：有资料或确认零命中时返回带边界的消息；其他情况返回原问题
+def compose_question(block_text: str, question: str, *, reason: ReferenceReason | None = None) -> str:
+    if block_text:
+        return f"{REFERENCE_PREFIX}{block_text}{QUESTION_PREFIX}{question}"
+    if reason == "empty":
+        return f"{EMPTY_REFERENCE_NOTICE}{QUESTION_PREFIX}{question}"
+    return question
 
 
 # 做什么：在线程自己的短会话里执行一次切片查询
@@ -116,8 +120,12 @@ async def collect_references(
         return ReferenceBundle(elapsed_ms=(monotonic() - started_at) * MILLISECONDS_PER_SECOND, reason="db_error")
     block_budget = _reference_budget(question, settings.chat_rag_token_budget)
     block, kept_items = build_reference_block(result.hits, block_budget)
+    reason = None
+    # 有命中但预算放不下，或者向量故障后关键词也没命中，都不能说资料不存在。
+    if not result.hits:
+        reason = "db_error" if result.vector_unavailable else "empty"
     return ReferenceBundle(
-        block=block, items=kept_items, hit_count=len(result.hits), reason=None if kept_items else "empty",
+        block=block, items=kept_items, hit_count=len(result.hits), reason=reason,
         dropped=result.dropped,
         elapsed_ms=(monotonic() - started_at) * MILLISECONDS_PER_SECOND,
     )

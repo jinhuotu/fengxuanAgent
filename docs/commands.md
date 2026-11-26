@@ -175,6 +175,9 @@ if (-not $env:LLM_API_KEY) { Remove-Item Env:\LLM_API_KEY }
 
 uv run --no-sync python -m pytest -m smoke --chat-mysql-port 13317
 
+# 单独查看余弦下限冒烟与每题分数；该用例默认不跑，发版前手动跑
+uv run --no-sync python -m pytest tests/test_smoke_answer_floor.py -m smoke --chat-mysql-port 13317 -o log_cli=true --log-cli-level=INFO
+
 Remove-Item Env:\LLM_API_KEY      # 跑完清掉终端里的 Key（没设过会报一句找不到，可忽略）
 
 # 旧的独立 MySQL 实测（并发占用、迁移注释核对）。它和冒烟测试的建表方式不同，跑之前要再换成空库
@@ -195,12 +198,13 @@ docker compose --profile verify stop mysql-verify
 | 向量语义排序 | `test_smoke_vector.py` | 真实模型 + 真实 Qdrant：问"请假审批"时讲请假的切片排第一；重复同步不翻倍；别的用户、别的库查不到 |
 | 向量删除 | `test_smoke_vector.py` | 按文档删除、按整库删除后点数归零 |
 | MySQL 上传检索删除 | `test_smoke_app.py` | 空库跑完整迁移链、结构与模型一致、ngram 全文索引存在；再经接口走建库→上传→混合检索→删除 |
+| 混合检索余弦下限 | `test_smoke_answer_floor.py` | 上传八篇项目文档，验证 5 道库内题全部命中、12 道库外题最多命中 1 道，逐题记录原始余弦 |
 | 模型连通 | `test_smoke_app.py` | 用终端里临时提供的 Key 真实调用一次，确认流式协议能被解析 |
 
 两个用例文件共用的准备代码（隔离库迁移、一次性集合、三条硬规矩的说明）在 `tests/smoke_support.py`，那里不放用例。
 
 三条规矩：向量只用 `smoke_` 开头的一次性集合，用完即删，不碰 `fengxuan_chunks`；数据库只连 `chat_verify`（口令 `chat-isolated-only`）；
-不读取 `.env`。不带 `--chat-mysql-port` 时 MySQL 那一条显示跳过，而不是带着别的库名去连。
+不读取 `.env`。不带 `--chat-mysql-port` 时，依赖 MySQL 的用例会跳过。
 
 冷启动那一条只告警、不判失败，数字出现在输出末尾的 warnings summary 里。本机实测冷启动 3–5 秒、常驻后单次 2–7ms：
 意思是**服务重启后的第一次提问很可能来不及带上资料**，这是已知待处理项，见 [进度文档](progress.md)。

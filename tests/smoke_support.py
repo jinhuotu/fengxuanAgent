@@ -76,7 +76,8 @@ def assert_database_is_migratable(database_url):
 # 入参：无；数据库地址来自隔离配置，只可能指向 chat_verify
 # 返回：无；任一步迁移失败时原样抛出
 def run_migrations_to_head():
-    alembic_config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    # 迁移脚本从隔离配置取连接串，pytest 继续管理日志，否则 Alembic 会禁用已有 logger。
+    alembic_config = Config()
     alembic_config.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
     command.upgrade(alembic_config, "head")
 

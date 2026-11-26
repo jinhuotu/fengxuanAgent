@@ -1,7 +1,10 @@
 """构造并执行 MySQL 知识库切片全文查询。"""
 from collections.abc import Sequence
 from dataclasses import dataclass
+from http import HTTPStatus
 
+from httpx import TransportError
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from sqlalchemy import Float, Integer, Select, String, bindparam, literal_column, select, text, type_coerce
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
@@ -22,6 +25,7 @@ class RelevantSearchResult:
     hits: list[RowMapping]
     candidates: int
     dropped: int
+    vector_unavailable: bool = False
 
 
 # 做什么：构造指定用户和知识库的全文查询，包括相关性排序和返回条数
@@ -70,10 +74,11 @@ def _candidate_limit(top_k: int) -> int:
 
 
 # 做什么：执行原有关键词检索、探针过滤并记录统计
-# 入参：数据库会话、归属用户、库编号、查询词、目标条数和候选上限
-# 返回：保留命中、候选和丢弃数
+# 入参：数据库会话、归属用户、库编号、查询词、目标条数、候选上限及是否向量降级
+# 返回：保留命中、候选数、丢弃数及向量降级状态
 def _keyword_search(
     db_session: Session, owner_id: int, knowledge_base_id: int, query: str, top_k: int, candidate_limit: int,
+    *, vector_unavailable: bool = False,
 ) -> RelevantSearchResult:
     candidates = search_chunks(db_session, owner_id, knowledge_base_id, query, top_k, candidate_limit=candidate_limit)
     # 长问句剥不出短词时改从候选正文里挑片段，短问句仍用原词。
@@ -91,7 +96,7 @@ def _keyword_search(
     probe_matches = [hit for hit in hits if probe and probe in hit["content"]]
     logger.info("知识库检索过滤 | 模式=keyword | knowledge_base_id=%s | 候选=%s | 保留=%s | 丢弃=%s | 探针命中=%s | 探针来源=%s",
                 knowledge_base_id, candidate_count, len(hits), dropped, len(probe_matches), probe_source)
-    return RelevantSearchResult(hits=hits, candidates=candidate_count, dropped=dropped)
+    return RelevantSearchResult(hits=hits, candidates=candidate_count, dropped=dropped, vector_unavailable=vector_unavailable)
 
 
 # 做什么：按切片编号回库校验归属和未删状态，丢弃索引里的陈旧点
@@ -170,32 +175,65 @@ def _fuse_candidates(
     return [{**rows_by_id[chunk_id], "score": fused_score[chunk_id]} for chunk_id in kept_ids[:top_k]]
 
 
+# 做什么：判断最高原始余弦是否低于回答下限，拦下时记录两路候选统计
+# 入参：模式、知识库编号、下限、关键词候选数和降序向量候选
+# 返回：有分数且低于下限时为 True；没有向量候选时为 False
+def _below_answer_floor(
+    mode: str, knowledge_base_id: int, floor: float, keyword_count: int, vector_rows: Sequence[dict],
+) -> bool:
+    # 新手注意：原始余弦像统一刻度的尺子，各路除以第一名后的分数只能比本次名次。
+    if not vector_rows:
+        return False
+    highest_score = vector_rows[0]["score"]
+    if highest_score >= floor:
+        return False
+    logger.info(
+        "知识库检索拦截 | 模式=%s | knowledge_base_id=%s | floor=%.4f | 最高余弦=%.4f | "
+        "关键词候选=%s | 向量候选=%s | 关键词有候选=%s",
+        mode, knowledge_base_id, floor, highest_score, keyword_count, len(vector_rows), keyword_count > 0,
+    )
+    return True
+
+
+# 做什么：识别向量服务的连接故障和服务端错误
+# 入参：Qdrant 客户端异常
+# 返回：服务不可用时为 True，协议解析和请求错误为 False
+def _vector_service_unavailable(error: ResponseHandlingException | UnexpectedResponse) -> bool:
+    if isinstance(error, ResponseHandlingException):
+        return isinstance(error.source, TransportError)
+    return error.status_code is not None and error.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
+
+
 # 做什么：按配置选择关键词、向量或混合检索，并统一成候选/保留统计
 # 入参：数据库会话、归属用户、库编号、查询词和结果上限
-# 返回：保留命中、原始候选条数及未入选条数；数据库异常直接抛出
-def search_relevant_chunks(
-    db_session: Session, owner_id: int, knowledge_base_id: int, query: str, top_k: int,
-) -> RelevantSearchResult:
+# 返回：命中及统计；向量服务不可用时走关键词，其他异常直接抛出
+def search_relevant_chunks(db_session: Session, owner_id: int, knowledge_base_id: int,
+                           query: str, top_k: int) -> RelevantSearchResult:
     settings = get_settings()
     mode = settings.vector_retrieval_mode if settings.vector_enabled else "keyword"
     candidate_limit = _candidate_limit(top_k)
     if mode == "keyword":
         return _keyword_search(db_session, owner_id, knowledge_base_id, query, top_k, candidate_limit)
-    if mode == "vector":
-        candidates = _vector_search(db_session, owner_id, knowledge_base_id, query, candidate_limit)
-        hits = _filter_vector(candidates, top_k, settings.vector_min_score_ratio)
-        dropped = len(candidates) - len(hits)
-        logger.info("知识库检索过滤 | 模式=vector | knowledge_base_id=%s | 候选=%s | 保留=%s | 丢弃=%s",
-                    knowledge_base_id, len(candidates), len(hits), dropped)
-        return RelevantSearchResult(hits=hits, candidates=len(candidates), dropped=dropped)
-    # hybrid：关键词保持原有探针优势，向量补语义召回，再按归一化分数合并。
-    keyword_rows = search_chunks(
-        db_session, owner_id, knowledge_base_id, query, top_k, candidate_limit=candidate_limit,
-    )
-    vector_rows = _vector_search(db_session, owner_id, knowledge_base_id, query, candidate_limit)
-    hits = _fuse_candidates(keyword_rows, vector_rows, top_k, settings.search_min_score_ratio)
+    try:
+        vector_rows = _vector_search(db_session, owner_id, knowledge_base_id, query, candidate_limit)
+    except (ResponseHandlingException, UnexpectedResponse) as error:
+        if not _vector_service_unavailable(error):
+            raise
+        logger.warning("知识库向量降级 | 模式=%s | knowledge_base_id=%s | error_type=%s",
+                       mode, knowledge_base_id, type(error).__name__)
+        return _keyword_search(db_session, owner_id, knowledge_base_id, query, top_k, candidate_limit, vector_unavailable=True)
+    keyword_rows: Sequence[RowMapping] = ()
+    if mode == "hybrid":
+        keyword_rows = search_chunks(db_session, owner_id, knowledge_base_id, query, top_k, candidate_limit=candidate_limit)
     candidate_count = len({row["chunk_id"] for row in keyword_rows} | {row["chunk_id"] for row in vector_rows})
-    dropped = candidate_count - len(hits)
-    logger.info("知识库检索过滤 | 模式=hybrid | knowledge_base_id=%s | 关键词候选=%s | 向量候选=%s | 合并候选=%s | 保留=%s | 丢弃=%s",
-                knowledge_base_id, len(keyword_rows), len(vector_rows), candidate_count, len(hits), dropped)
-    return RelevantSearchResult(hits=hits, candidates=candidate_count, dropped=dropped)
+    if _below_answer_floor(mode, knowledge_base_id, settings.vector_answer_floor, len(keyword_rows), vector_rows):
+        return RelevantSearchResult(hits=[], candidates=candidate_count, dropped=candidate_count)
+    if mode == "vector":
+        hits = _filter_vector(vector_rows, top_k, settings.vector_min_score_ratio)
+        logger.info("知识库检索过滤 | 模式=vector | knowledge_base_id=%s | 候选=%s | 保留=%s | 丢弃=%s",
+                    knowledge_base_id, candidate_count, len(hits), candidate_count - len(hits))
+    else:
+        hits = _fuse_candidates(keyword_rows, vector_rows, top_k, settings.search_min_score_ratio)
+        logger.info("知识库检索过滤 | 模式=hybrid | knowledge_base_id=%s | 关键词候选=%s | 向量候选=%s | 合并候选=%s | 保留=%s | 丢弃=%s",
+                    knowledge_base_id, len(keyword_rows), len(vector_rows), candidate_count, len(hits), candidate_count - len(hits))
+    return RelevantSearchResult(hits=hits, candidates=candidate_count, dropped=candidate_count - len(hits))
