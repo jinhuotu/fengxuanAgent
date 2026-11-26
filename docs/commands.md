@@ -40,6 +40,9 @@ uv run uvicorn app.main:app --reload --port 8081
 # 日常隔离回归，自动加载测试配置，不读取 .env
 uv run --no-sync python -m pytest -q
 
+# 启用提交前自动检查（每个克隆执行一次，钩子脚本在 .githooks/ 里，随仓库提交）
+git config core.hooksPath .githooks
+
 # 语法检查
 uv run python -m compileall app
 
@@ -157,17 +160,22 @@ uv run python scripts/create_admin.py --username admin
 默认的 `pytest -q` 只连假依赖（内存数据库、假模型、内存向量库），不碰本机容器和外部模型。
 发版前另外跑一遍连真实依赖的冒烟测试，确认"平时测不到的那段链路"是通的。
 
-前提：`fengxuan-qdrant` 在运行；`.env` 里配了 `LLM_API_KEY`（没配的话模型那一条会显示跳过）。
+前提：`fengxuan-qdrant` 在运行。冒烟测试不读取 `.env`：模型密钥只在你想验证模型时，由你在当前终端临时提供（不提供则模型那一条显示跳过）。
 
 ```powershell
-# 每次都换成全新的空库（两个验证都要求从空库开始）
+# 每次都换成全新的空库（两个验证都要求从空库开始；数据在内存盘上，重建即清空）
 docker compose --profile verify up -d --force-recreate mysql-verify
 
 # 等 STATUS 出现 (healthy)，内存盘上通常十几秒
 docker compose ps mysql-verify
 
-# 跑冒烟测试。-s 是为了看到"向量化耗时"和"模型连通"两行
-uv run --no-sync python -m pytest -m smoke -s --chat-mysql-port 13317
+# 可选：顺便验证模型连通性。Key 只留在当前终端，不写进任何文件
+$env:LLM_API_KEY = Read-Host -MaskInput '输入 LLM_API_KEY（不想验证模型就直接回车）'
+if (-not $env:LLM_API_KEY) { Remove-Item Env:\LLM_API_KEY }
+
+uv run --no-sync python -m pytest -m smoke --chat-mysql-port 13317
+
+Remove-Item Env:\LLM_API_KEY      # 跑完清掉终端里的 Key（没设过会报一句找不到，可忽略）
 
 # 旧的独立 MySQL 实测（并发占用、迁移注释核对）。它和冒烟测试的建表方式不同，跑之前要再换成空库
 docker compose --profile verify up -d --force-recreate mysql-verify
@@ -179,20 +187,42 @@ docker compose --profile verify stop mysql-verify
 
 不要用 `docker compose down` 来重置隔离库：那会把 mysql / redis / qdrant 三个正式容器一并停掉。
 
-四条冒烟用例各管一段真实链路：
+五条冒烟用例各管一段真实链路：
 
 | 用例 | 验证什么 |
 |---|---|
 | 模型加载与检索时限 | 全新进程加载向量化模型的冷启动耗时、常驻后的单次耗时，和检索时限（`chat_rag_timeout_ms`，当前 800ms）对比 |
-| 向量读写往返 | 真实模型 + 真实 Qdrant：语义排序、重复同步不翻倍、按用户和库隔离、按文档和按库删除 |
+| 向量语义排序 | 真实模型 + 真实 Qdrant：问"请假审批"时讲请假的切片排第一；重复同步不翻倍；别的用户、别的库查不到 |
+| 向量删除 | 按文档删除、按整库删除后点数归零 |
 | MySQL 上传检索删除 | 空库跑完整迁移链、结构与模型一致、ngram 全文索引存在；再经接口走建库→上传→混合检索→删除 |
-| 模型连通 | 用 `.env` 的 Key 真实调用一次，确认流式协议能被解析 |
+| 模型连通 | 用终端里临时提供的 Key 真实调用一次，确认流式协议能被解析 |
 
 三条规矩：向量只用 `smoke_` 开头的一次性集合，用完即删，不碰 `fengxuan_chunks`；数据库只连 `chat_verify`（口令 `chat-isolated-only`）；
-不带 `--chat-mysql-port` 时 MySQL 那一条显示跳过，而不是带着别的库名去连。
+不读取 `.env`。不带 `--chat-mysql-port` 时 MySQL 那一条显示跳过，而不是带着别的库名去连。
 
-冷启动那一条只告警、不判失败。本机实测冷启动 3–5 秒、常驻后单次 2–7ms：意思是**服务重启后的第一次提问很可能来不及带上资料**，
-这是已知待处理项，见 [进度文档](progress.md)。
+冷启动那一条只告警、不判失败，数字出现在输出末尾的 warnings summary 里。本机实测冷启动 3–5 秒、常驻后单次 2–7ms：
+意思是**服务重启后的第一次提问很可能来不及带上资料**，这是已知待处理项，见 [进度文档](progress.md)。
+
+## 二之六、提交前自动检查
+
+钩子脚本放在仓库的 `.githooks/` 目录里，随代码一起提交；Git 默认不会去那里找，所以**每个克隆要启用一次**：
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+启用后每次 `git commit` 的行为：
+
+| 本次提交暂存了什么 | 钩子做什么 | 大约耗时 |
+|---|---|---|
+| 只有文档这类文件 | 不跑测试，直接放行 | 即时 |
+| `.py`、`pyproject.toml`、`alembic/`、`app/llm/prompts/` 任一文件 | 跑全量 `pytest -q`，不通过就拦下提交 | 约 2 分钟 |
+
+确实要先存一版时临时跳过：`git commit --no-verify`。跳过的提交等于没有测试保护，之后要补跑全量。
+
+三点说明：钩子用的是项目虚拟环境里的 Python（`.venv/`），没有就退回 PATH 里的 `python`；
+它检查的是工作区当前的文件，暂存区之外还没打算提交的改动也会被一起测；
+钩子里跑的是默认全量，不含冒烟测试，冒烟测试仍按「二之五」在发版前手动跑。
 
 ## 三、四个文件的分工（记这一句就够）
 

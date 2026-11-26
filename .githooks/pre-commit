@@ -1,0 +1,28 @@
+#!/bin/sh
+# 提交前自动检查：本次提交涉及代码就跑全量测试，不通过就拦下这次提交。
+# 启用（每个克隆执行一次）：git config core.hooksPath .githooks
+# 确实要先存一版时临时跳过：git commit --no-verify
+
+# Git 执行钩子时不加载你的终端配置，PATH 里常常没有 uv，所以优先用项目虚拟环境里的解释器
+if [ -x .venv/Scripts/python.exe ]; then
+  PYTHON=.venv/Scripts/python.exe
+elif [ -x .venv/bin/python ]; then
+  PYTHON=.venv/bin/python
+else
+  PYTHON=python
+fi
+
+# 只改文档这类文件时不跑测试：全量要两分钟，不该拖慢每一刀的文档提交。
+# 判断依据是暂存区里的文件：Python 代码、依赖与 pytest 配置、迁移、系统提示词，任一改动都跑全量。
+CODE_CHANGED=$(git diff --cached --name-only --diff-filter=ACMRD | grep -E '\.py$|\.toml$|^alembic/|^app/llm/prompts/')
+if [ -z "$CODE_CHANGED" ]; then
+  echo "提交前检查：本次没有改代码，跳过测试"
+  exit 0
+fi
+
+echo "提交前检查：运行后端全量测试（约 2 分钟）..."
+"$PYTHON" -m pytest -q || {
+  echo ""
+  echo "测试未通过，提交已被拦下。修好后再提交；确实要先存一版用：git commit --no-verify"
+  exit 1
+}

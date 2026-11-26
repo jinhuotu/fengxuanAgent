@@ -4,7 +4,7 @@
 #   docker compose up -d mysql      只起数据库（阶段一、二需要）
 #   docker compose up -d redis      到阶段三需要缓存时再单独起
 #   docker compose up -d qdrant     启用向量检索（VECTOR_ENABLED=true）时起
-#   docker compose --profile verify up -d mysql-verify   发版前跑冒烟测试时临时起，用完就停
+#   docker compose --profile verify up -d --force-recreate mysql-verify   发版前跑冒烟测试时临时起（每次都是空库），用完就停
 #   docker compose ps               看状态，等 STATUS 出现 (healthy) 才算好
 #
 # 端口为什么是 3307 / 6380：
