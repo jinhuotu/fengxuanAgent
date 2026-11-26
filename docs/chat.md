@@ -255,7 +255,7 @@ storage 中的登录键变化或 clear、可见/焦点校准发现 token 变化�
 | tests/test_chat_budget.py、前端 tests/chat-context.test.mjs | 预算边界、缓存动态重算、历史保留及普通提示隔离 |
 | tests/test_chat_prewarm.py、前端 tests/chat-history-sync.test.mjs | 预热与完成响应解耦、有界执行、生命周期及立即追问竞争 |
 | tests/test_chat_*.py、test_llm_client.py、mysql_chat_checks.py | 接口、状态、缓存、真实断线和独立 MySQL 验证 |
-| tests/test_smoke_real.py | 连真实 Qdrant、MySQL 隔离库和外部模型的冒烟测试，带 smoke 标记、默认不跑 |
+| tests/smoke_support.py、test_smoke_vector.py、test_smoke_app.py | 连真实 Qdrant、MySQL 隔离库和外部模型的冒烟测试及公用准备代码，带 smoke 标记、默认不跑 |
 | 前端 tests/chat-*.test.mjs、package.json | 无新依赖的流解码和真实交互模块测试 |
 | 两端 docs/architecture.md、progress.md、commands.md | 架构、进度和命令同步 |
 
@@ -269,7 +269,7 @@ storage 中的登录键变化或 clear、可见/焦点校准发现 token 变化�
 `test_chat_live.py` 会启动随机本地端口，使用真实 HTTP 断开验证中断持久化，然后关闭测试服务。
 前端运行 `npm run test:chat` 和 `npm run build`。测试执行真实解码、交互模块，只替换网络和身份边界。
 `mysql_chat_checks.py` 只用于显式指定的独立 `chat_verify` 测试库，不清表，不允许真实库凭证。
-`test_smoke_real.py` 同样只连该隔离库，并额外连本机 Qdrant 与外部模型；默认被 `-m "not smoke"` 排除，运行方法见 [命令文档](commands.md)。
+`test_smoke_vector.py`、`test_smoke_app.py` 同样只连该隔离库，并额外连本机 Qdrant 与外部模型；默认被 `-m "not smoke"` 排除，运行方法见 [命令文档](commands.md)。
 本次独立 MySQL 验证包括两条真实对话迁移、模型一致性、三张表的 SHOW FULL COLUMNS/SHOW CREATE TABLE、同会话竞争，以及两个连接池的八请求竞争；剩余三名额时恰好放行三请求。临时隔离容器验证后已关闭并自动清理。
 尚未用用户真实 Key 调用 DeepSeek，也未代替用户完成生产反向代理的流式验收。
 

@@ -77,7 +77,7 @@ services:
       retries: 5
 
   mysql-verify:
-    # 仅供"连真实 MySQL 的验证"使用：冒烟测试 tests/test_smoke_real.py 和 tests/mysql_chat_checks.py。
+    # 仅供"连真实 MySQL 的验证"使用：冒烟测试 tests/test_smoke_*.py 和 tests/mysql_chat_checks.py。
     # 口令和库名写死成测试专用值：项目规定测试不得使用真实库凭证。
     # profiles 让它默认不启动，也不会跟着 docker compose up 一起起来。
     # 数据目录挂在内存盘上：容器一停数据就没了，每次重建都是空库（两个验证都要求从空库开始）：
