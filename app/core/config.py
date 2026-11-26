@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     # 向量候选的相对下限：低于本次最高相似度一半的候选不进入结果。
     vector_min_score_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
     # 知识库回答的余弦下限：最高原始相似度低于此值时丢弃两路候选。
-    vector_answer_floor: float = Field(default=0.55, ge=0.0, le=1.0)
+    vector_answer_floor: float = Field(default=0.52, ge=0.0, le=1.0)
     chat_prewarm_enabled: bool = True
     chat_prewarm_queue_capacity: int = Field(default=20, ge=1, le=1000)
     chat_prewarm_workers: int = Field(default=2, ge=1, le=8)

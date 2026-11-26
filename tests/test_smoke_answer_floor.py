@@ -3,6 +3,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.core.config import get_settings
+from app.core.knowledge import RAG_TOP_K
 from app.core.logging import get_logger
 from app.models.knowledge import KnowledgeChunk
 from app.rag import retrieval, vector_index
@@ -40,6 +41,16 @@ OUT_OF_SCOPE_QUESTIONS = (
 )
 SEARCH_TOP_K = 5
 MAX_OUT_OF_SCOPE_HITS = 1
+BOUNDARY_CASES = (
+    ("React 下拉菜单怎么实现", 0.530, 0.560, True),
+    ("什么是学习率", 0.495, 0.519, False),
+    ("红烧肉怎么做才不腻", 0.360, 0.420, False),
+    ("明天郑州天气怎么样", 0.300, 0.360, False),
+    ("量子纠缠是什么", 0.375, 0.430, False),
+    ("对话历史是怎么保存的", 0.590, 0.650, True),
+    ("数据库里有哪些表", 0.570, 0.630, True),
+    ("怎么运行测试脚本", 0.690, 0.725, True),
+)
 
 
 # 做什么：通过正式上传服务为隔离库写入八篇项目文档并核对向量同步
@@ -106,3 +117,22 @@ def test_hybrid_answer_floor_on_project_documents(mysql_sessions, answer_floor_c
                 answer_floor_corpus, len(IN_SCOPE_QUESTIONS) - len(rejected), len(IN_SCOPE_QUESTIONS),
                 len(leaked), len(OUT_OF_SCOPE_QUESTIONS))
     assert not rejected and len(leaked) <= MAX_OUT_OF_SCOPE_HITS, f"库内误拒前五={rejected}，库外命中前五={leaked}"
+
+
+# 做什么：用对话同样的候选上限复查边界题的原始余弦和命中
+# 入参：隔离库会话工厂与已上传真实项目文档的测试库编号
+# 返回：无；任一问题的分数越界或命中不符时列出实际结果
+def test_hybrid_answer_floor_keeps_calibrated_boundary(mysql_sessions, answer_floor_corpus):
+    knowledge_base_id = answer_floor_corpus
+    candidate_limit = retrieval._candidate_limit(RAG_TOP_K)
+    failures = []
+    with mysql_sessions() as db_session:
+        for question, lower, upper, expected_hit in BOUNDARY_CASES:
+            vector_rows = retrieval._vector_search(db_session, SMOKE_USER_ID, knowledge_base_id, question, candidate_limit)
+            score = vector_rows[0]["score"] if vector_rows else None
+            result = retrieval.search_relevant_chunks(db_session, SMOKE_USER_ID, knowledge_base_id, question, RAG_TOP_K)
+            details = f"{question} | 最高余弦={score} | 区间=[{lower}, {upper}] | 命中={len(result.hits)} | 期望={expected_hit}"
+            logger.info("余弦边界冒烟 | knowledge_base_id=%s | %s", knowledge_base_id, details)
+            if score is None or not lower <= score <= upper or bool(result.hits) != expected_hit:
+                failures.append(details)
+    assert not failures, "\n".join(failures)
