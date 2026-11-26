@@ -1,4 +1,6 @@
 """独立验证资料块格式与字节预算。"""
+import logging
+
 from app.rag.context import build_reference_block, compose_question
 
 EXPECTED_REFERENCE_PREFIX = (
@@ -64,6 +66,25 @@ def test_reference_budget_keeps_two_complete_chunks() -> None:
     assert [item["chunk_id"] for item in items] == [1, 2]
     assert block.count(content) == 2
     assert len(block.encode("utf-8")) <= 8000
+
+
+# 做什么：验证预算裁掉完整切片时记录裁剪前后字节数
+# 入参：pytest 日志捕获器，使用三条约三千字节的参考资料
+# 返回：无；缺少同库编号的裁剪日志或字节数不准确时断言失败
+def test_reference_budget_logs_original_and_retained_bytes(caplog) -> None:
+    knowledge_base_id = 14
+    chunk_character_count = 1000
+    byte_budget = 8000
+    content = "字" * chunk_character_count
+    hits = [make_hit(chunk_id, "标题", content) for chunk_id in (1, 2, 3)]
+    full_block, _ = build_reference_block(hits, byte_budget * len(hits))
+    with caplog.at_level(logging.INFO, logger="app.rag.context"):
+        block, items = build_reference_block(hits, byte_budget, knowledge_base_id=knowledge_base_id)
+    original_bytes = len(full_block.encode("utf-8"))
+    retained_bytes = len(block.encode("utf-8"))
+    assert len(items) == 2 and retained_bytes <= byte_budget < original_bytes
+    assert (f"参考资料块被预算裁剪 | knowledge_base_id={knowledge_base_id} | 原始={original_bytes} 字节 | "
+            f"保留={retained_bytes} 字节 | 预算={byte_budget} 字节") in caplog.messages
 
 
 # 做什么：确认零字节预算不生成资料或引用

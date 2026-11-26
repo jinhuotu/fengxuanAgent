@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 from app.core.knowledge import RAG_TOP_K
+from app.core.logging import get_logger
 from app.llm import client as model_client
 from app.llm.tokens import effective_input_budget, estimate_request_tokens, estimate_text_tokens
 from app.rag import retrieval
@@ -22,6 +23,7 @@ QUESTION_PREFIX = "\n\n我的问题：\n"
 EMPTY_REFERENCE_NOTICE = "本次在所选知识库中没有检索到相关资料。"
 MILLISECONDS_PER_SECOND = 1000
 ReferenceReason = Literal["no_selection", "empty", "timeout", "db_error"]
+logger = get_logger(__name__)
 
 
 class ReferenceItem(TypedDict):
@@ -45,29 +47,34 @@ class ReferenceBundle:
 
 
 # 做什么：按命中顺序加入预算内的完整切片，生成资料和引用元数据
-# 入参：命中行及资料块的 UTF-8 字节预算
+# 入参：命中行、资料块的 UTF-8 字节预算和可用于裁剪日志的知识库编号
 # 返回：资料块与已入选的引用；没有可容纳的切片时返回空块和空列表
 def build_reference_block(
-    hits: Sequence[Mapping[str, Any]], byte_budget: int
+    hits: Sequence[Mapping[str, Any]], byte_budget: int, *, knowledge_base_id: int | None = None,
 ) -> tuple[str, list[ReferenceItem]]:
     parts: list[str] = []
     kept_items: list[ReferenceItem] = []
-    used_bytes = 0
+    original_bytes = 0
     for index, hit in enumerate(hits, start=1):
         heading = " ".join(hit["heading_path"].splitlines())
-        separator = "\n\n" if parts else ""
+        separator = "\n\n" if index > 1 else ""
         part = f"{separator}[{index}] {heading}\n{hit['content']}"
-        part_bytes = estimate_text_tokens(part)
-        # 一整块放不下就停，资料字节与引用编号始终对应。
-        if used_bytes + part_bytes > byte_budget:
-            break
+        original_bytes += estimate_text_tokens(part)
+        # 超限后只累计原始字节数，保留项仍是连续的完整切片。
+        if original_bytes > byte_budget:
+            continue
         parts.append(part)
-        used_bytes += part_bytes
         kept_items.append(ReferenceItem(
             index=index, chunk_id=hit["chunk_id"], document_id=hit["document_id"],
             heading_path=heading, char_start=hit["char_start"], char_end=hit["char_end"], score=hit["score"],
         ))
-    return "".join(parts), kept_items
+    block = "".join(parts)
+    if knowledge_base_id is not None and len(kept_items) < len(hits):
+        logger.info(
+            "参考资料块被预算裁剪 | knowledge_base_id=%s | 原始=%s 字节 | 保留=%s 字节 | 预算=%s 字节",
+            knowledge_base_id, original_bytes, estimate_text_tokens(block), byte_budget,
+        )
+    return block, kept_items
 
 
 # 做什么：把参考资料或确实零命中的提示放在本轮用户问题之前
@@ -119,7 +126,7 @@ async def collect_references(
     except Exception:
         return ReferenceBundle(elapsed_ms=(monotonic() - started_at) * MILLISECONDS_PER_SECOND, reason="db_error")
     block_budget = _reference_budget(question, settings.chat_rag_token_budget)
-    block, kept_items = build_reference_block(result.hits, block_budget)
+    block, kept_items = build_reference_block(result.hits, block_budget, knowledge_base_id=knowledge_base_id)
     reason = None
     # 有命中但预算放不下，或者向量故障后关键词也没命中，都不能说资料不存在。
     if not result.hits:
