@@ -1,6 +1,6 @@
 """用户管理接口。
 
-按权限创建用户、查看、追加和撤销角色。
+按权限创建用户、查看、追加和撤销角色、切换状态、逻辑删除。
 登录、取当前用户仍在 auth.py —— 一个是"进门的门禁"，一个是"进来以后管事"，不混在一起。
 """
 
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import (
     require_role_assign_permission,
     require_user_creation_permission,
+    require_user_delete_permission,
     require_user_disable_permission,
     require_user_list_permission,
 )
@@ -67,6 +68,22 @@ def change_user_status(
         db_session, operator_id=current_user.id, user_id=user_id, status=payload.status
     )
     return success({"changed": changed, "status": payload.status})
+
+
+# 做什么：逻辑删除他人账号，不删除数据库里的行
+# 入参：目标用户编号、已获授权的操作者和独立写入会话
+# 返回：统一响应，deleted_user_id 是被删除的编号
+# 失败：无权限 -> 403/2001；删除本人 -> 403/2003；目标不存在或已删除 -> 404/1007；
+#       目标是最后一名启用的管理员 -> 409/2004
+@router.delete("/users/{user_id}", summary="删除用户（逻辑删除，需要 users:delete 权限）")
+def delete_user(
+    user_id: int = Path(gt=0),
+    current_user: UserInfo = Depends(require_user_delete_permission),
+    # 新手注意：鉴权用一张草稿纸，写入另取一张，避免查询已打开事务。
+    db_session: Session = Depends(get_db, use_cache=False),
+) -> dict:
+    user_service.delete_user(db_session, operator_id=current_user.id, user_id=user_id)
+    return success({"deleted_user_id": user_id})
 
 
 # 做什么：给他人追加一个角色

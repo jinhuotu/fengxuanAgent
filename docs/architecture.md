@@ -76,6 +76,7 @@ Python 包通过 `__init__.py` 声明包边界。`models/__init__.py` 还会导�
 `POST /users/{user_id}/roles` 检查 `users:assign_role`，接收 `{role_code}`，返回 `{created}` 表示是否新增。追加本人角色返回 `403/2003`。鉴权会话与写入会话通过 `use_cache=False` 分开，由角色绑定服务管理写入事务。
 `DELETE /users/{user_id}/roles/{role_code}` 同样检查 `users:assign_role`，返回 `data.removed`。撤销本人返回 `403/2003`。撤销 `admin` 前锁定角色行并统计其他启用管理员，数量为零时返回 `409/2004`。
 `PATCH /users/{user_id}/status` 检查 `users:disable`，接收 `active` 或 `disabled`，返回 `data.changed` 和 `data.status`。拒绝操作本人和停用最后一名启用管理员。停用时在同一事务里递增令牌版本，启用时保留版本。
+`DELETE /users/{user_id}` 检查 `users:delete`，逻辑删除：同一事务里递增令牌版本并把 `is_deleted` 置 1，不删除行、不改 `status`，返回 `data.deleted_user_id`。删除本人 `403/2003`，删除最后一名启用管理员 `409/2004`，目标不存在或此前已删除 `404/1007`。已删除账号在用户列表、状态切换、角色追加和管理员计数中一律按不存在处理，登录返回 `403/1003`。其用户名仍被占用，不能重复注册。
 `GET /roles` 检查 `users:list`，在 `data.items` 中按角色代码排序返回 `code` 和 `name`。
 `services/rbac.py` 的 `has_permission()` 用 EXISTS 查询按多角色并集判断，停用账号不放行。`ensure_permission()` 在无权限时抛出 `PermissionDeniedError`，由依赖调用，接口层不写业务判断。
 

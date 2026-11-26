@@ -1,6 +1,6 @@
 """用户管理的业务逻辑。
 
-这里负责创建用户、分页读取公开信息和切换账号状态。
+这里负责创建用户、分页读取公开信息、切换账号状态和逻辑删除账号。
 "调用的人是不是管理员"属于鉴权，交给 api/deps.py 的依赖判断，不写在这。
 """
 
@@ -17,7 +17,7 @@ from app.core.errors import (
     UsernameTakenError,
 )
 from app.core.security import hash_password
-from app.models.user import USER_STATUS_ACTIVE, USER_STATUS_DISABLED, User
+from app.models.user import IS_DELETED, IS_NOT_DELETED, USER_STATUS_ACTIVE, USER_STATUS_DISABLED, User
 from app.models.rbac import Role, UserRole
 from app.schemas.rbac import RoleSummary
 from app.schemas.auth import UserInfo
@@ -88,7 +88,10 @@ def change_user_status(db_session: Session, operator_id: int, user_id: int, stat
     if operator_id == user_id:
         raise CannotModifySelfError()
     with db_session.begin():
-        user_query = select(User).options(undefer(User.token_version)).where(User.id == user_id)
+        # 已删除的账号当作不存在：不能再被启用，否则它会带着"正常"状态回到列表里
+        user_query = select(User).options(undefer(User.token_version)).where(
+            User.id == user_id, User.is_deleted == IS_NOT_DELETED
+        )
         target_user = db_session.scalar(user_query.with_for_update())
         if target_user is None:
             raise UserNotFoundError()
@@ -102,13 +105,37 @@ def change_user_status(db_session: Session, operator_id: int, user_id: int, stat
     return True
 
 
-# 做什么：按用户编号升序分页查询，仅返回公开字段
+# 做什么：逻辑删除他人账号：只打删除标记，不删这一行，并让已签发的登录凭证全部失效
+# 入参：未开启事务的会话、操作者编号和目标用户编号
+# 返回：无；操作本人、目标不存在（含此前已删除）或需保护最后一名启用的管理员时抛业务异常
+def delete_user(db_session: Session, operator_id: int, user_id: int) -> None:
+    if operator_id == user_id:
+        raise CannotModifySelfError("不能删除自己的账号")
+    with db_session.begin():
+        # 与停用用同一把用户行锁：同一账号的删除和状态切换排队处理，不会互相覆盖。
+        # 查不到也包括"已经删过"，对调用方统一表现为用户不存在。
+        user_query = select(User).options(undefer(User.token_version)).where(
+            User.id == user_id, User.is_deleted == IS_NOT_DELETED
+        )
+        target_user = db_session.scalar(user_query.with_for_update())
+        if target_user is None:
+            raise UserNotFoundError()
+        # 与停用共用同一条保护：目标若是一名启用的管理员，删掉之后系统还得剩至少一名。
+        # 停用状态的管理员本来就不计入，所以删一个已停用的管理员不会被拦。
+        _ensure_admin_remains_after_disable(db_session, target_user)
+        # 递增令牌版本：这个账号手上的登录凭证立刻失效；将来即使恢复账号，旧凭证也不能再用
+        target_user.token_version += 1
+        target_user.is_deleted = IS_DELETED
+    logger.info("用户逻辑删除 | operator_id=%s | user_id=%s", operator_id, user_id)
+
+
+# 做什么：按用户编号升序分页查询未删除的用户，仅返回公开字段
 # 入参：数据库会话和已校验的分页参数
-# 返回：当前页、总人数及分页信息；数据库错误直接抛出
+# 返回：当前页、未删除的总人数及分页信息；数据库错误直接抛出
 def list_users(db_session: Session, query: UserListQuery) -> UserListResponse:
-    total_users = db_session.scalar(select(func.count()).select_from(User))
+    total_users = db_session.scalar(select(func.count()).select_from(User).where(User.is_deleted == IS_NOT_DELETED))
     offset_count = (query.page - 1) * query.page_size
-    user_query = select(User.id, User.username, User.display_name, User.status)
+    user_query = select(User.id, User.username, User.display_name, User.status).where(User.is_deleted == IS_NOT_DELETED)
     user_query = user_query.order_by(User.id).offset(offset_count).limit(query.page_size)
     user_rows = db_session.execute(user_query).mappings().all()
     user_ids = [user_row["id"] for user_row in user_rows]

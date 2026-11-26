@@ -10,7 +10,8 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, func, text
+from sqlalchemy import Boolean, DateTime, Integer, String, func, text
+from sqlalchemy.dialects.mysql import TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -18,6 +19,11 @@ from app.db.base import Base
 # 状态用常量不用魔法字符串：别处判断"是否停用"时引用常量，拼错了会立刻报错而不是悄悄失效
 USER_STATUS_ACTIVE = "active"
 USER_STATUS_DISABLED = "disabled"
+# 软删除标记的取值：与知识库、对话表用同一套约定（零正常，一已删除）
+IS_NOT_DELETED = 0
+IS_DELETED = 1
+# 新手注意：类型变体像两套编号模板，MySQL 用 TINYINT，SQLite 测试用 INTEGER。
+DELETION_TYPE = TINYINT().with_variant(Integer, "sqlite")
 
 
 class User(Base):
@@ -80,4 +86,14 @@ class User(Base):
         server_default=func.now(),
         onupdate=func.now(),
         comment="更新时间，由数据库生成",
+    )
+
+    # 软删除标记：删除用户只把它置一，不删这一行。
+    # 已删除的账号不能登录、不出现在用户列表里，名下的知识库和对话记录原样保留；
+    # 登录名仍然被这一行占着，同一个用户名不能重新注册。
+    is_deleted: Mapped[int] = mapped_column(
+        DELETION_TYPE,
+        default=IS_NOT_DELETED,
+        server_default=str(IS_NOT_DELETED),
+        comment="软删除标记，零表示正常，一表示已删除",
     )

@@ -39,7 +39,7 @@ uv run python scripts/create_admin.py --username admin
 - 参数：无
 - 前置条件：MySQL 容器已启动、`alembic upgrade head` 已执行（四张 RBAC 表必须先存在）。
 - 可否重复执行：可以。每个权限点、每个角色、每条授权关系都是先按 code 查再插，已存在的跳过；不会插重复，也不会重置绑定时间。
-- 内容：权限点 `users:create`、`users:disable`、`users:list` 和 `users:assign_role`。角色 `admin` 挂全部四项，`user` 的权限清单为空。
+- 内容：权限点 `users:create`、`users:disable`、`users:delete`、`users:list` 和 `users:assign_role`。角色 `admin` 挂全部五项，`user` 的权限清单为空。
 - 执行方式（在项目根目录）：
 
 ```powershell

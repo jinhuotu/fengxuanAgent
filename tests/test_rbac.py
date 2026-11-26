@@ -293,7 +293,7 @@ def test_seed_rbac_is_idempotent(role_session: Session, monkeypatch: pytest.Monk
         first_permission_count = first_session.scalar(permission_count_query)
     seed_rbac.main()
     with test_sessions.begin() as second_session:
-        assert second_session.scalar(permission_count_query) == first_permission_count == 4
+        assert second_session.scalar(permission_count_query) == first_permission_count == 5
         second_session.add(UserRole(user_id=2, role_id=2))
     assert has_permission(role_session, 2, "users:assign_role")
 

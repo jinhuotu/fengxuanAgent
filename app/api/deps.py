@@ -93,3 +93,14 @@ def require_user_disable_permission(
 ) -> UserInfo:
     rbac_service.ensure_permission(db_session, current_user.id, rbac_service.PERMISSION_USERS_DISABLE)
     return current_user
+
+
+# 做什么：将当前用户交给服务检查是否拥有删除用户的权限
+# 入参：已验证身份的用户和请求级数据库会话
+# 返回：有权限的用户；未登录、停用或无权限时抛对应业务异常
+def require_user_delete_permission(
+    current_user: UserInfo = Depends(get_current_user),
+    db_session: Session = Depends(get_db),
+) -> UserInfo:
+    rbac_service.ensure_permission(db_session, current_user.id, rbac_service.PERMISSION_USERS_DELETE)
+    return current_user

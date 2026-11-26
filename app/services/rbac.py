@@ -12,7 +12,7 @@ from app.core.errors import (
     UserNotFoundError,
 )
 from app.models.rbac import Permission, Role, RolePermission, UserRole
-from app.models.user import USER_STATUS_ACTIVE, User
+from app.models.user import IS_NOT_DELETED, USER_STATUS_ACTIVE, User
 from app.schemas.rbac import RoleSummary
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ PERMISSION_USERS_CREATE = "users:create"
 PERMISSION_USERS_LIST = "users:list"
 PERMISSION_USERS_ASSIGN_ROLE = "users:assign_role"
 PERMISSION_USERS_DISABLE = "users:disable"
+PERMISSION_USERS_DELETE = "users:delete"
 ROLE_LIST_BATCH_SIZE = 100
 # 与 scripts/seed_rbac.py 中 admin 角色的代码耦合，变更时需同步。
 ADMIN_ROLE_CODE = "admin"
@@ -33,7 +34,7 @@ def bind_user_role(db_session: Session, user_id: int, role_code: str, operator_i
         raise CannotModifySelfError()
     with db_session.begin():
         # 新手注意：锁住用户行像先拿号码牌，同一用户的绑定请求依次处理。
-        user_query = select(User.id).where(User.id == user_id).with_for_update()
+        user_query = select(User.id).where(User.id == user_id, User.is_deleted == IS_NOT_DELETED).with_for_update()
         if db_session.scalar(user_query) is None:
             raise UserNotFoundError()
         role_id = db_session.scalar(select(Role.id).where(Role.code == role_code))
@@ -60,6 +61,8 @@ def count_active_role_holders(db_session: Session, role_code: str, exclude_user_
         .where(
             Role.code == role_code,
             User.status == USER_STATUS_ACTIVE,
+            # 已逻辑删除的账号虽然状态可能还是"正常"，但不算还在岗的管理员
+            User.is_deleted == IS_NOT_DELETED,
             UserRole.user_id != exclude_user_id,
         )
     )

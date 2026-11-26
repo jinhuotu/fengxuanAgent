@@ -14,7 +14,7 @@ from app.core.errors import (
     TokenInvalidError,
 )
 from app.core.security import AccessTokenClaims, create_access_token, decode_access_token, verify_password
-from app.models.user import USER_STATUS_ACTIVE, User
+from app.models.user import IS_DELETED, USER_STATUS_ACTIVE, User
 from app.schemas.auth import LoginResponse, UserInfo
 from app.services import login_guard
 
@@ -41,6 +41,10 @@ def authenticate_user(db_session: Session, username: str, password: str) -> User
 
     if not verify_password(password, user.password_hash):
         raise InvalidCredentialsError()
+
+    # 密码对了但账号已被逻辑删除，和停用同样处理：身份已知、无权进入，给 403
+    if user.is_deleted == IS_DELETED:
+        raise AccountDisabledError()
 
     # 密码对了但账号被管理员停用，属于"身份已知、无权进入"，单独给 403
     if user.status != USER_STATUS_ACTIVE:
@@ -84,7 +88,8 @@ def resolve_token_user(
         raise TokenInvalidError()
     if user.token_version != claims.token_version:
         raise TokenInvalidError()
-    if user.status != USER_STATUS_ACTIVE:
+    # 已逻辑删除的账号即使拿着版本正确的凭证也不能继续用
+    if user.is_deleted == IS_DELETED or user.status != USER_STATUS_ACTIVE:
         raise AccountDisabledError()
     return user
 
