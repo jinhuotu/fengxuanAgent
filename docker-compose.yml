@@ -4,6 +4,7 @@
 #   docker compose up -d mysql      只起数据库（阶段一、二需要）
 #   docker compose up -d redis      到阶段三需要缓存时再单独起
 #   docker compose up -d qdrant     启用向量检索（VECTOR_ENABLED=true）时起
+#   docker compose --profile verify up -d mysql-verify   发版前跑冒烟测试时临时起，用完就停
 #   docker compose ps               看状态，等 STATUS 出现 (healthy) 才算好
 #
 # 端口为什么是 3307 / 6380：
@@ -74,6 +75,37 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  mysql-verify:
+    # 仅供"连真实 MySQL 的验证"使用：冒烟测试 tests/test_smoke_real.py 和 tests/mysql_chat_checks.py。
+    # 口令和库名写死成测试专用值：项目规定测试不得使用真实库凭证。
+    # profiles 让它默认不启动，也不会跟着 docker compose up 一起起来。
+    # 数据目录挂在内存盘上：容器一停数据就没了，每次重建都是空库（两个验证都要求从空库开始）：
+    #   docker compose --profile verify up -d --force-recreate mysql-verify
+    # 用完停掉：docker compose --profile verify stop mysql-verify
+    # 不要用 docker compose down 来重置它：那会把 mysql / redis / qdrant 三个正式容器一并停掉。
+    image: mysql:8.4
+    container_name: fengxuan-mysql-verify
+    profiles: ["verify"]
+    restart: "no"
+    ports:
+      - "127.0.0.1:13317:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: chat-isolated-only
+      MYSQL_DATABASE: chat_verify
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
 volumes:
   fengxuan_mysql_data:
