@@ -129,7 +129,7 @@ uv run python scripts/seed_rbac.py
 
 - 用途：删除并重建 Qdrant 向量集合，把数据库中有效切片重新向量化，用于首次建索引、换模型或修复同步失败。
 - 参数：无
-- 前置条件：`fengxuan-qdrant` 容器已启动；`.env` 中 `VECTOR_ENABLED=true`；`EMBEDDING_DIM` 与新模型一致。
+- 前置条件：`fengxuan-qdrant` 容器已启动（`docker compose up -d qdrant`）；`.env` 中 `VECTOR_ENABLED=true`；`EMBEDDING_DIM` 与新模型一致。
 - 可否重复执行：可以。每次都会删除旧集合，跑完以数据库为准重建。
 - 执行方式（在项目根目录）：
 

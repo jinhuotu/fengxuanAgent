@@ -209,3 +209,7 @@
 - 日期：2026-11-25。
 - 决定：修复上传后全文索引自检被静默跳过的问题。向量同步（45e183b）用请求会话做只读查询后没有结束事务，随后自检的 `db_session.begin()` 报 `InvalidRequestError`，被自检入口吞成 WARNING，JSON 与文件两条上传路径都受影响。
 - 说明：向量同步改在 `with db_session.begin()` 内执行，查完即结束事务；新增 `test_upload_leaves_no_open_transaction`（去掉修复即失败）。真实 MySQL 复验：两条路径自检均"命中条数=1"。全量回归 395 项通过。
+
+- 日期：2026-11-26。
+- 决定：Qdrant 纳入 `docker-compose.yml`，和 MySQL、Redis 用同一个入口管理。此前向量库（45e183b）是手动 `docker run` 起的，仓库里没有它的定义：重启后不会自动拉起，端口还绑在所有网卡上。
+- 说明：新增 `qdrant` 服务（镜像 v1.13.4，只绑 `127.0.0.1` 的 6335/6336，`restart: unless-stopped`，健康检查借 bash 的 `/dev/tcp`），沿用已有数据卷 `fengxuan-qdrant-data`，没有重建索引。接管前后点数均为 123（512 维、余弦）；在独立端口走上传、向量同步、混合检索、删除全链路，点数 123→157→123。本刀无迁移，未改应用代码。`docker compose up` 会提示该数据卷"not created by Docker Compose"，属预期。

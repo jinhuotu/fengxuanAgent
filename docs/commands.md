@@ -8,7 +8,7 @@
 - Python：3.12.5（`D:\environment\python\python12`）
 - 依赖管理：**uv 0.13.9**（winget 安装）
 - 虚拟环境：`.venv`，**由 uv 维护，日常不需要手动激活**
-- 数据库 / 缓存：**Docker**（`docker-compose.yml`），MySQL 映射 3307、Redis 映射 6380
+- 数据库 / 缓存 / 向量库：**Docker**（`docker-compose.yml`），MySQL 映射 3307、Redis 映射 6380、Qdrant 映射 6335/6336
 - 索引源：清华 PyPI 镜像，写在 `pyproject.toml` 的 `[[tool.uv.index]]`
 - 项目路径：`D:\code\LLM\fengxuanAgent`，服务端口 8081
 <!-- 历史端口：后端 8000。 -->
@@ -66,9 +66,9 @@ uv tree
 uv pip list
 ```
 
-## 二之二、容器化基础设施（MySQL / Redis）
+## 二之二、容器化基础设施（MySQL / Redis / Qdrant）
 
-数据库和缓存都跑在 Docker 里（`docker-compose.yml`），不用本机装的 MySQL。
+数据库、缓存和向量库都跑在 Docker 里（`docker-compose.yml`），不用本机装的 MySQL。
 
 ```powershell
 # 只起数据库（阶段一、二用这个）
@@ -77,7 +77,10 @@ docker compose up -d mysql
 # 到阶段三需要缓存时再单独起
 docker compose up -d redis
 
-# 看状态，等 STATUS 出现 (healthy) 才算真的可用，通常要 40 秒左右
+# 启用向量检索（.env 里 VECTOR_ENABLED=true）时起；起完要跑一次 scripts/rebuild_vector_index.py
+docker compose up -d qdrant
+
+# 看状态，等 STATUS 出现 (healthy) 才算真的可用，MySQL 通常要 40 秒左右
 docker compose ps
 
 # 看启动日志（第一次启动出问题先看这里）
@@ -92,6 +95,8 @@ docker compose down
 # 危险：连数据卷一起删，库里的数据全部丢失，只在确定重建时用
 docker compose down -v
 ```
+
+Qdrant 没有设密码，所以端口只绑 `127.0.0.1`，别的机器连不进来。它的数据卷 `fengxuan-qdrant-data` 是早先手动建的，`docker compose up` 会提示一句 `volume ... was not created by Docker Compose`，属预期，可忽略。
 
 端口约定：容器里的 3306 映射到本机 **3307**，Redis 的 6379 映射到 **6380**。
 原因是本机 3306 和 6379 已被本地安装的服务占用，另一个项目又占了 13306 / 26379，
