@@ -69,9 +69,27 @@ def login(db_session: Session, username: str, password: str) -> LoginResponse:
         raise
 
     login_guard.clear_failures(username)
+    return issue_login_response(user)
+
+
+# 做什么：给账号签发一张登录凭证并换算出秒数有效期
+# 入参：已确认可以登录的用户，版本号取它当前的数据
+# 返回：LoginResponse，含 access_token、token_type、expires_in（单位秒）
+def issue_login_response(user: User) -> LoginResponse:
     access_token = create_access_token(user.id, token_version=user.token_version)
     expires_in = settings.jwt_expire_minutes * SECONDS_PER_MINUTE
     return LoginResponse(access_token=access_token, expires_in=expires_in)
+
+
+# 做什么：给仍然有效的登录凭证换发一张新的，有效期从现在重新计算
+# 入参：db_session 请求级会话；token 客户端带来的 Bearer 凭证
+# 返回：LoginResponse，令牌版本保持不变
+# 失败：凭证过期或伪造抛 TokenInvalidError；账号停用或已删除抛 AccountDisabledError
+# 说明：旧凭证在自身到期前仍然可用。要让某个账号的凭证立刻全部作废，走退出、改密、停用或删除，它们会递增版本
+def refresh(db_session: Session, token: str) -> LoginResponse:
+    claims = decode_access_token(token)
+    user = resolve_token_user(db_session, claims)
+    return issue_login_response(user)
 
 
 # 做什么：按签发版本校验用户，修改凭证的请求可以锁住该用户行

@@ -1,7 +1,7 @@
 """认证接口。
 
 这一层只做三件事：收参数、调 service、包统一响应。
-判断账号对不对、密码错没错，一律在 services 里，这里不写一个 if。
+判断账号对不对、密码错没错、凭证能不能续，一律在 services 里，这里不写一个 if。
 """
 
 from fastapi import APIRouter, Depends
@@ -30,6 +30,18 @@ def login_endpoint(payload: LoginRequest, db_session: Session = Depends(get_db))
         db_session, username=payload.username, password=payload.password
     )
     return success(login_result.model_dump())
+
+
+# 做什么：续期接口入口，把客户端带来的旧凭证交给 service 换一张新的
+# 入参：Bearer token 和请求级数据库会话
+# 返回：统一响应，data 与登录相同（access_token / token_type / expires_in）
+# 失败：凭证缺失、过期、伪造转 401；账号停用或已删除转 403；本函数不做判断
+@router.post("/refresh", summary="续期登录凭证")
+def refresh_endpoint(
+    token: str = Depends(get_access_token),
+    db_session: Session = Depends(get_db),
+) -> dict:
+    return success(auth_service.refresh(db_session, token).model_dump())
 
 
 # 做什么：返回当前登录用户的信息，证明这枚 token 确实代表某个人

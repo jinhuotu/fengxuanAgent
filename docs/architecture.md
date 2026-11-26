@@ -71,6 +71,7 @@ Python 包通过 `__init__.py` 声明包边界。`models/__init__.py` 还会导�
 登录签发 JWT 时带用户当前令牌版本 `ver`，认证时与 `users.token_version` 比较。版本不同时返回 `401/1002`。迁移前签发且未过期的无版本令牌按版本 0 校验。
 `POST /auth/change-password` 校验凭证和旧密码后，在同一事务里更新密码和令牌版本。成功返回 `data: null`，旧密码错误为 `400/1006`。
 `POST /auth/logout` 校验本人凭证，在事务里递增令牌版本并返回 `data: null`。该账号此前签发的令牌随即失效。
+`POST /auth/refresh` 用仍然有效的本人凭证换一张新凭证，返回与登录相同的 data，`expires_in` 默认 3600。令牌版本不变，旧凭证和其他设备的凭证在自己到期前继续可用；凭证缺失、伪造、过期为 `401/1002`，账号停用或已删除为 `403/1003`。有效期是硬期限（签发时间 + `JWT_EXPIRE_MINUTES`，默认 60），服务端不判断是否闲置，续期和闲置退出都由前端计时发起。
 `POST /users` 通过 `require_user_creation_permission` 依赖，由 RBAC 服务检查 `users:create` 权限。`is_admin` 不替代角色授权；运行服务切换前须先确保现有管理员获得对应角色权限。
 `GET /users` 检查 `users:list`，按 page/page_size 返回 items/total/page/page_size。每条含 id/username/display_name/status/roles，角色仅含 code/name。先分页用户，再批量查该页角色，无角色返回 []；普通页三次 SQL，空页跳过角色查询。
 `POST /users/{user_id}/roles` 检查 `users:assign_role`，接收 `{role_code}`，返回 `{created}` 表示是否新增。追加本人角色返回 `403/2003`。鉴权会话与写入会话通过 `use_cache=False` 分开，由角色绑定服务管理写入事务。
