@@ -11,7 +11,9 @@ from app.core.knowledge import (
     SEARCH_QUERY_MIN_CHARS,
     SEARCH_TOP_K_DEFAULT,
     SEARCH_TOP_K_MAX,
+    DocumentSource,
     DocumentStatus,
+    FileKind,
 )
 from app.schemas.user import DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE
 
@@ -68,7 +70,21 @@ class KnowledgeDocumentItem(BaseModel):
     title: str
     char_count: int
     status: DocumentStatus
+    source_type: DocumentSource
+    file_type: FileKind
+    file_name: str | None
+    file_size: int | None
     created_at: datetime
+
+
+class KnowledgeFileTypeItem(BaseModel):
+    """可上传的文件类型；enabled 为假表示识别得出但解析通道还没打通。"""
+
+    kind: int
+    name: str
+    extensions: list[str]
+    enabled: bool
+    note: str | None = None
 
 
 class KnowledgeDocumentListResponse(BaseModel):

@@ -64,6 +64,15 @@ def list_knowledge_bases(
     return success(knowledge_bases.model_dump(mode="json"))
 
 
+# 做什么：返回当前可上传的文件类型，供前端渲染类型卡片
+# 入参：已登录用户
+# 返回：类型编号、名称、后缀、是否可用与未启用说明
+@router.get("/file-types", summary="可上传的文件类型")
+def list_knowledge_file_types(current_user: UserInfo = Depends(get_current_user)) -> dict:
+    file_types = knowledge_service.list_file_types()
+    return success([file_type.model_dump(mode="json") for file_type in file_types])
+
+
 # 做什么：接收纯文本文档并返回创建结果
 # 入参：知识库编号、已校验的请求体、当前用户和独立写入会话
 # 返回：统一响应；未登录、库不可见或参数错误时返回对应错误

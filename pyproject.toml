@@ -22,6 +22,8 @@ dependencies = [
     "fastembed>=0.9.1",
     "python-docx>=1.2,<2",
     "pypdf>=6,<7",
+    "python-pptx>=1.0,<2",
+    "openpyxl>=3.1,<4",
 ]
 
 # 开发依赖：只在本机用，不进生产镜像（uv sync --no-dev 就会跳过这组）
@@ -41,15 +43,15 @@ markers = [
     "smoke: 连本机 Qdrant、MySQL 隔离库和外部模型的冒烟测试，默认不收集执行",
 ]
 
+# 显式指定索引源：本机和服务器、Docker 构建都用同一个源，
+# 避免"本机读到了哪个 pip 配置就从哪装"这种不可复现的情况。
+# 换源只需改这一处，然后 uv lock 重新生成锁定文件。
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
 [tool.uv]
 # 这是一个应用，不是要发布到 PyPI 的库，不需要 build backend
 package = false
 # 默认就安装 dev 组；生产用 uv sync --no-dev
 default-groups = ["dev"]
-
-# 显式指定索引源：本机和服务器、Docker 构建都用同一个源，
-# 避免"本机读到了哪个 pip 配置就从哪装"这种不可复现的情况。
-# 换源只需改这一处，然后 uv lock 重新生成锁定文件。
-[[tool.uv.index]]
-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
-default = true

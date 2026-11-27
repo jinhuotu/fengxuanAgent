@@ -11,7 +11,7 @@ from app.models.chat import ChatSession
 from app.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
 from app.rag import index_maintenance, retrieval
 from app.schemas.knowledge import KnowledgeDocumentCreate
-from app.services import knowledge
+from app.services import knowledge, knowledge_document_store as document_store
 from tests.test_knowledge import (
     DELETED,
     DOCUMENT_URL,
@@ -219,10 +219,10 @@ def test_upload_index_probe_order(monkeypatch, caplog, matches, expected_actions
     actions = Mock()
     actions.search.side_effect = [[Mock()] if matched else [] for matched in matches]
     monkeypatch.setattr(retrieval, "search_chunks", actions.search)
-    monkeypatch.setattr(knowledge, "sleep", actions.sleep)
-    monkeypatch.setattr(knowledge, "rebuild_fulltext_index", actions.rebuild)
-    with caplog.at_level("INFO", logger=knowledge.__name__):
-        knowledge._verify_search_index_after_upload(session, OWNER_ID, OWNER_BASE_ID, [chunk])
+    monkeypatch.setattr(document_store, "sleep", actions.sleep)
+    monkeypatch.setattr(document_store, "rebuild_fulltext_index", actions.rebuild)
+    with caplog.at_level("INFO", logger=document_store.__name__):
+        document_store.verify_search_index_after_upload(session, OWNER_ID, OWNER_BASE_ID, [chunk])
     expected_calls = {
         "search": call.search(session, OWNER_ID, OWNER_BASE_ID, PROBE_CONTENT[:12], 1),
         "sleep": call.sleep(0.2), "rebuild": call.rebuild(session),
@@ -239,7 +239,7 @@ def test_upload_skips_index_check_in_sqlite(knowledge_client, knowledge_sessions
     rebuild = Mock()
     statements = Mock()
     monkeypatch.setattr(retrieval, "search_chunks", search)
-    monkeypatch.setattr(knowledge, "rebuild_fulltext_index", rebuild)
+    monkeypatch.setattr(document_store, "rebuild_fulltext_index", rebuild)
     event.listen(knowledge_sessions.kw["bind"], "before_cursor_execute", statements)
     response = knowledge_client.post(DOCUMENT_URL, json={"title": "索引验收", "content": PROBE_CONTENT}, headers=owner_headers)
     assert response.status_code == 200 and response.json()["data"]["status"] == DocumentStatus.READY
@@ -252,7 +252,7 @@ def test_upload_skips_index_check_in_sqlite(knowledge_client, knowledge_sessions
 # 入参：隔离会话工厂、预建库、替身工具和日志捕获器
 # 返回：无；事务时序、返回状态或日志不符时断言失败
 def test_upload_probe_failure_keeps_document_ready(knowledge_sessions, document_bases, monkeypatch, caplog):
-    original_probe = knowledge._verify_search_index_after_upload
+    original_probe = document_store.verify_search_index_after_upload
     bind = Mock()
     bind.dialect.name = "mysql"
     broken_search = Mock(side_effect=RuntimeError("测试探针查询失败"))
@@ -268,7 +268,7 @@ def test_upload_probe_failure_keeps_document_ready(knowledge_sessions, document_
         monkeypatch.setattr(db_session, "get_bind", Mock(return_value=bind))
         original_probe(db_session, owner_id, knowledge_base_id, chunks)
 
-    monkeypatch.setattr(knowledge, "_verify_search_index_after_upload", verify_committed_upload)
+    monkeypatch.setattr(document_store, "verify_search_index_after_upload", verify_committed_upload)
     with knowledge_sessions() as db_session:
         payload = KnowledgeDocumentCreate(title="索引异常自检", content=PROBE_CONTENT)
         document = knowledge.create_knowledge_document(db_session, OWNER_ID, OWNER_BASE_ID, payload)
@@ -295,8 +295,8 @@ def test_delete_index_check_runs_after_commit(knowledge_client, knowledge_sessio
 
     index_check = Mock(side_effect=check_committed_delete)
     rebuild = Mock()
-    monkeypatch.setattr(knowledge, "_verify_search_index_after_delete", index_check)
-    monkeypatch.setattr(knowledge, "rebuild_fulltext_index", rebuild)
+    monkeypatch.setattr(document_store, "verify_search_index_after_delete", index_check)
+    monkeypatch.setattr(document_store, "rebuild_fulltext_index", rebuild)
     delete_url = BASE_URL if delete_base else f"{DOCUMENT_URL}/{document_id}"
     response = knowledge_client.delete(delete_url, headers=owner_headers)
     assert response.status_code == 200 and response.json()["code"] == 0
@@ -316,7 +316,7 @@ def test_delete_skips_rebuild_without_mysql(knowledge_client, knowledge_sessions
     def refuse_rebuild(_db_session):
         raise AssertionError("非 MySQL 环境不应重建全文索引")
 
-    monkeypatch.setattr(knowledge, "rebuild_fulltext_index", refuse_rebuild)
+    monkeypatch.setattr(document_store, "rebuild_fulltext_index", refuse_rebuild)
     with knowledge_sessions() as db_session:
         result = knowledge.delete_knowledge_document(db_session, OWNER_ID, OWNER_BASE_ID, document_id)
         assert result.deleted_chunks >= 1 and not db_session.in_transaction()

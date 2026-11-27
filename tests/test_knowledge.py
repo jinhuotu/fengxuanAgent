@@ -183,7 +183,7 @@ def test_upload_document_preserves_content(knowledge_client, owner_headers, know
     assert response.status_code == 200
     assert response.json()["code"] == 0
     document_item = response.json()["data"]
-    assert set(document_item) == {"id", "title", "char_count", "status", "created_at"}
+    assert set(document_item) == {"id", "title", "char_count", "status", "source_type", "file_type", "file_name", "file_size", "created_at"}
     assert document_item["title"] == title
     assert document_item["char_count"] == len(content)
     assert type(document_item["status"]) is int and document_item["status"] == DocumentStatus.READY
@@ -239,7 +239,7 @@ def test_document_list_filters_by_base_owner_and_deletion(
     items = page_result["items"]
     assert (page_result["total"], page_result["page"], page_result["page_size"]) == (2, 1, 20)
     assert [(item["id"], item["status"]) for item in items] == [(5, 6), (1, 1)]
-    assert all(set(item) == {"id", "title", "char_count", "status", "created_at"} for item in items)
+    assert all(set(item) == {"id", "title", "char_count", "status", "source_type", "file_type", "file_name", "file_size", "created_at"} for item in items)
     second_page = knowledge_client.get(f"{DOCUMENT_URL}?page=2&page_size=1", headers=owner_headers)
     assert second_page.status_code == 200
     assert second_page.json()["data"] == {"items": [items[1]], "total": 2, "page": 2, "page_size": 1}

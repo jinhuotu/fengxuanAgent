@@ -217,7 +217,7 @@ class KnowledgeUploadInvalidError(BusinessError):
 class KnowledgeUploadTypeError(BusinessError):
     code = CODE_KNOWLEDGE_UPLOAD_TYPE
     http_status = 415
-    message = "仅支持 .txt、.md、.docx、.pdf 文件"
+    message = "当前不支持这个文件类型"
 
 
 class KnowledgeUploadSizeError(BusinessError):

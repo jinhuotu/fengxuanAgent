@@ -13,7 +13,7 @@ from app.services import knowledge_upload
 from tests.test_knowledge import DOCUMENT_URL, OTHER_BASE_ID, document_bases, knowledge_client, knowledge_sessions, owner_headers
 
 FILE_URL = f"{DOCUMENT_URL}/file"
-WORD_TEXT = "段落正文\n表格左栏\n表格右栏\n结束段落"
+DOCX_TEXT = "段落正文\n\n表格左栏 | 表格右栏\n\n结束段落"
 PDF_TEXT = "Text layer from a PDF"
 
 
@@ -76,17 +76,18 @@ def assert_no_documents(knowledge_sessions) -> None:
         assert session.scalar(select(func.count()).select_from(KnowledgeChunk)) == 0
 
 
-# 做什么：确认每种格式抽取出的原文都入库，切片偏移与正文一致
-# 入参：隔离客户端、文件字节构造函数、文件名和预期原文
-# 返回：无；标题、就绪状态或切片文字偏离预期时断言失败
-@pytest.mark.parametrize(("filename", "content_factory", "expected"), [
-    ("中文.txt", lambda: "中文纯文本\r\n保留换行".encode("gb18030"), "中文纯文本\r\n保留换行"),
-    ("知识笔记.MD", lambda: "# UTF-8 笔记\n段落内容".encode("utf-8"), "# UTF-8 笔记\n段落内容"),
-    ("报告.docx", word_file, WORD_TEXT),
-    ("文字层.pdf", text_pdf, PDF_TEXT),
+# 做什么：确认每种格式抽取出的原文都入库，切片偏移与原文一致
+# 入参：隔离客户端、文件字节构造函数、文件名、预期原文与块数
+# 返回：无；标题、就绪状态、块数或切片文字偏离预期时断言失败
+@pytest.mark.parametrize(("filename", "content_factory", "expected", "expected_chunks"), [
+    ("中文.txt", lambda: "中文纯文本\r\n保留换行".encode("gb18030"), "中文纯文本\r\n保留换行", 1),
+    ("知识笔记.MD", lambda: "# UTF-8 笔记\n段落内容".encode("utf-8"), "# UTF-8 笔记\n段落内容", 1),
+    ("报告.docx", word_file, DOCX_TEXT, 3),
+    ("文字层.pdf", text_pdf, PDF_TEXT, 1),
 ])
 def test_upload_file_indexes_extracted_text(
-    knowledge_client, knowledge_sessions, owner_headers, document_bases, filename, content_factory, expected,
+    knowledge_client, knowledge_sessions, owner_headers, document_bases,
+    filename, content_factory, expected, expected_chunks,
 ) -> None:
     uploaded = knowledge_client.post(FILE_URL, files={"file": (filename, content_factory())}, headers=owner_headers)
     assert uploaded.status_code == 200, uploaded.json()
@@ -97,24 +98,28 @@ def test_upload_file_indexes_extracted_text(
     with knowledge_sessions() as session:
         assert session.get(KnowledgeDocument, document["id"]).raw_content == expected
     response = knowledge_client.get(f"{DOCUMENT_URL}/{document['id']}/chunks", headers=owner_headers)
-    assert response.status_code == 200 and response.json()["data"]["total"] == 1
-    chunk = response.json()["data"]["items"][0]
-    assert chunk["content"] == expected[chunk["char_start"]:chunk["char_end"]]
-    assert expected.strip() == chunk["content"]
+    assert response.status_code == 200 and response.json()["data"]["total"] == expected_chunks
+    items = response.json()["data"]["items"]
+    for chunk in items:
+        assert chunk["content"] == expected[chunk["char_start"]:chunk["char_end"]]
+    assert "\n\n".join(chunk["content"] for chunk in items) == expected
 
 
 # 做什么：确认格式、原件大小、正文、编码和非文字 PDF 错误都不入库
 # 入参：隔离夹具及不同的失败样例
 # 返回：无；状态码、业务码、文案或事务边界不符合预期时断言失败
 @pytest.mark.parametrize(("filename", "payload", "status", "code", "message"), [
-    ("资料.csv", b"table", 415, 4005, "仅支持 .txt、.md、.docx、.pdf 文件"),
+    ("资料.csv", b"table", 415, 4005,
+     "暂不支持 .csv，当前支持 .docx / .md / .pdf / .pptx / .txt / .xlsx"),
     ("超大.txt", b"a" * (DOCUMENT_FILE_MAX_BYTES + 1), 413, 4006, "文件不能超过 10 MB，请拆分后上传"),
     ("正文超长.md", b"a" * (DOCUMENT_CONTENT_LENGTH + 1), 422, 4008, "文件正文不能超过 50000 字，请拆分后上传"),
     ("空白.txt", b" \n\t", 422, 4008, "文件没有可用正文，请检查内容后上传"),
-    ("未知编码.txt", b"\xff", 422, 4007, "文件编码无法识别"),
-    ("损坏.docx", b"not a zip file", 422, 4007, "文件解析失败，请确认文件完整且未加密"),
+    ("未知编码.txt", b"\xff", 415, 4005,
+     "无法识别文件内容，可能已损坏；当前支持 .docx / .md / .pdf / .pptx / .txt / .xlsx"),
+    ("损坏.docx", b"not a zip file", 415, 4005,
+     "扩展名 .docx 与文件实际类型（文本）不符，请确认文件是否被改名"),
     ("扫描.pdf", minimal_pdf(b"q 20 0 0 20 0 0 cm BI /W 1 /H 1 /BPC 8 /CS /G ID \x00 EI Q"),
-     422, 4007, "未识别到文字，暂不支持扫描件"),
+     422, 4007, "这份 PDF 没有文字层（多半是扫描件），需要 OCR 能力后才能处理"),
     ("长" * 101 + ".txt", b"valid text", 400, 4004, "文件名去掉扩展名后须为 1–100 字，请重命名后上传"),
 ])
 def test_reject_file_without_leaving_document(

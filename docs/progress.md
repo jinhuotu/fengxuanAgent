@@ -254,3 +254,7 @@
 - 日期：2026-11-27。
 - 决定：新增工作进度平台，六张表（目标、关键结果、计划、任务、学习单元、每日记录，迁移 `e8b3c6a12d47`）与一组 `/plan/*` 接口，供四个页面视图共用同一份数据。目标进度按关键结果的数值达成率自动折算（`clamp((当前-起始)/(目标-起始))` 取平均，手动模式直接用手填值）；计划进度按"已完成 /（总数-放弃）"；学习按 1/3/7/14/30 天间隔档位，答对升档、答错退档，到期判断在读取时按日期算，不引入后台定时任务。每日记录一人一天一条，`PUT /plan/daily/{date}` 覆盖写。
 - 说明：常量与七个 IntEnum 进 `app/core/plan.py`；服务层按职责拆成 goals / projects / tasks / study / daily / plan_progress 六个文件，进度计算是纯函数便于单测；归属一律在服务层按 `owner_id` 校验，不建物理外键，不新增权限码。新增 `tests/test_plan.py` 9 条隔离用例。全量 422 passed、7 deselected；迁移已在真实 MySQL（3307）升到 head，六张表建成。
+
+- 日期：2026-11-27。
+- 决定：知识库上传改为"先探测真实类型、再按类型走独立通道"。`knowledge_probe` 按魔数识别 PDF、zip 容器（docx / pptx / xlsx）、OLE 老 Office、图片、视频与纯文本，扩展名只用来对照；扩展名与实际类型不符、含宏、老格式一律拒绝并给出具体原因。`knowledge_channel_*` 各自解析分块：文本整篇、Markdown 按标题、PDF 按页、Word 按 Heading 样式分章且表格转"列名：值"、PPT 一页一块带备注、Excel 每 20 行一块并重复表头。各通道只产出统一的 `ParsedFile(text, drafts)`，写库、向量同步、引用偏移与删除级联仍共用一套。
+- 说明：文档落库与索引自检从 `services/knowledge.py` 拆到 `knowledge_document_store.py`（`persist_document` 支持传入预切块，纯文本路径行为不变），`knowledge.py` 由 484 行降到 305 行。`knowledge_documents` 新增 `source_type / file_type / file_name / file_size` 四列（迁移 `f9c4d2b81e5a`，已在 3307 真实库升到 head），新增 `GET /knowledge-bases/file-types` 供前端渲染类型卡片。图片与视频能识别但通道未启用（本机缺 OCR / ASR 引擎），清单里返回 `enabled=false` 并附原因。新增依赖 `python-pptx`、`openpyxl`（已获用户同意）。新增 `tests/test_knowledge_channels.py` 13 条，全量 435 passed、7 deselected。

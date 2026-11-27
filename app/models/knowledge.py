@@ -5,7 +5,13 @@ from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.dialects.mysql import MEDIUMTEXT, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.knowledge import CHUNK_HEADING_PATH_LENGTH, DOCUMENT_TITLE_LENGTH
+from app.core.knowledge import (
+    CHUNK_HEADING_PATH_LENGTH,
+    DOCUMENT_FILE_NAME_LENGTH,
+    DOCUMENT_TITLE_LENGTH,
+    DocumentSource,
+    FileKind,
+)
 from app.db.base import Base
 
 # 新手注意：类型变体像两套编号模板，MySQL 用 BIGINT，SQLite 测试用 INTEGER 自增。
@@ -66,6 +72,19 @@ class KnowledgeDocument(Base):
         TINYINT().with_variant(Integer, "sqlite"),
         comment="处理状态：一待切分，二解析中，三切分中，四建索引中，五可检索，六处理失败",
     )
+    source_type: Mapped[int] = mapped_column(
+        TINYINT().with_variant(Integer, "sqlite"), default=DocumentSource.PASTE,
+        server_default=str(DocumentSource.PASTE), comment="来源：一上传文件，二粘贴文本，三URL抓取",
+    )
+    file_type: Mapped[int] = mapped_column(
+        TINYINT().with_variant(Integer, "sqlite"), default=FileKind.TEXT,
+        server_default=str(FileKind.TEXT),
+        comment="文件类型：一文本，二PDF，三Word，四PPT，五Excel，六图片，七视频",
+    )
+    file_name: Mapped[str | None] = mapped_column(
+        String(DOCUMENT_FILE_NAME_LENGTH), comment="原始文件名，粘贴文本为空"
+    )
+    file_size: Mapped[int | None] = mapped_column(Integer, comment="原始文件字节数，粘贴文本为空")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), comment="创建时间，东八区"
     )
