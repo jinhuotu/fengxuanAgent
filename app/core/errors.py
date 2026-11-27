@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 # 错误码规则：1000-1999 认证类；2000-2999 权限类；3000-3999 对话类。
-# 4000-4999 知识库类；5000 起是系统级。
+# 4000-4999 知识库类；6000-6999 计划类；5000 起是系统级。
 # 前端靠 code 判断具体原因，靠 HTTP 状态码判断大类，两者都要对，不能一律返回 200。
 CODE_INVALID_PARAMS = 1000
 CODE_INVALID_CREDENTIALS = 1001
@@ -36,6 +36,12 @@ CODE_KNOWLEDGE_UPLOAD_SIZE = 4006
 CODE_KNOWLEDGE_UPLOAD_PARSE = 4007
 CODE_KNOWLEDGE_UPLOAD_CONTENT = 4008
 CODE_KNOWLEDGE_UPLOAD_TIMEOUT = 4009
+CODE_PLAN_GOAL_NOT_FOUND = 6001
+CODE_PLAN_KEY_RESULT_NOT_FOUND = 6002
+CODE_PLAN_PROJECT_NOT_FOUND = 6003
+CODE_PLAN_TASK_NOT_FOUND = 6004
+CODE_PLAN_STUDY_ITEM_NOT_FOUND = 6005
+CODE_PLAN_DATE_RANGE = 6006
 CODE_INTERNAL_ERROR = 5000
 
 DEFAULT_HTTP_STATUS = 400
@@ -236,6 +242,59 @@ class KnowledgeUploadTimeoutError(BusinessError):
     code = CODE_KNOWLEDGE_UPLOAD_TIMEOUT
     http_status = 408
     message = "文件解析超时，请拆分后重试"
+
+
+# 做什么：统一处理不存在、已删除或不属于当前用户的目标
+# 入参：无，使用公开错误文案
+# 返回：抛出后由全局处理器转成 404/6001
+class PlanGoalNotFoundError(BusinessError):
+    code = CODE_PLAN_GOAL_NOT_FOUND
+    http_status = 404
+    message = "目标不存在"
+
+
+# 做什么：统一处理不存在或不属于当前用户的关键结果
+# 入参：无，使用公开错误文案
+# 返回：抛出后由全局处理器转成 404/6002
+class PlanKeyResultNotFoundError(BusinessError):
+    code = CODE_PLAN_KEY_RESULT_NOT_FOUND
+    http_status = 404
+    message = "关键结果不存在"
+
+
+# 做什么：统一处理不存在、已删除或不属于当前用户的计划
+# 入参：无，使用公开错误文案
+# 返回：抛出后由全局处理器转成 404/6003
+class PlanProjectNotFoundError(BusinessError):
+    code = CODE_PLAN_PROJECT_NOT_FOUND
+    http_status = 404
+    message = "计划不存在"
+
+
+# 做什么：统一处理不存在或不属于当前用户的任务
+# 入参：无，使用公开错误文案
+# 返回：抛出后由全局处理器转成 404/6004
+class PlanTaskNotFoundError(BusinessError):
+    code = CODE_PLAN_TASK_NOT_FOUND
+    http_status = 404
+    message = "任务不存在"
+
+
+# 做什么：统一处理不存在或不属于当前用户的学习单元
+# 入参：无，使用公开错误文案
+# 返回：抛出后由全局处理器转成 404/6005
+class PlanStudyItemNotFoundError(BusinessError):
+    code = CODE_PLAN_STUDY_ITEM_NOT_FOUND
+    http_status = 404
+    message = "学习单元不存在"
+
+
+# 做什么：计划或目标的结束日期早于开始日期
+# 入参：可选自定义提示
+# 返回：抛出后由全局处理器转成 400/6006
+class PlanDateRangeError(BusinessError):
+    code = CODE_PLAN_DATE_RANGE
+    message = "结束日期不能早于开始日期"
 
 
 # 做什么：把上面这些异常接住，转成统一响应结构

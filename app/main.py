@@ -20,6 +20,7 @@ from app.api.v1.users import router as users_router
 from app.api.v1.chat import router as chat_router
 from app.api.v1.knowledge import chunk_router as knowledge_chunk_router
 from app.api.v1.knowledge import router as knowledge_router
+from app.api.v1.plan import router as plan_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import bind_request_id, get_logger, release_request_id, setup_logging
@@ -101,6 +102,8 @@ app.include_router(chat_router)
 app.include_router(knowledge_router)
 # 对话引用只带切片编号，独立路由可直接查原文。
 app.include_router(knowledge_chunk_router)
+# 工作进度平台：目标、计划、任务、学习复习与每日记录，均为个人数据。
+app.include_router(plan_router)
 
 
 # 做什么：确认服务活着、数据库能连

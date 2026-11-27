@@ -8,3 +8,11 @@ from app.models.rbac import Permission, Role, RolePermission, UserRole  # noqa: 
 from app.models.user import User  # noqa: F401
 from app.models.chat import ChatGenerationGate, ChatMessage, ChatSession  # noqa: F401
 from app.models.knowledge import KnowledgeBase  # noqa: F401
+from app.models.plan import (  # noqa: F401
+    PlanDailyLog,
+    PlanGoal,
+    PlanKeyResult,
+    PlanProject,
+    PlanStudyItem,
+    PlanTask,
+)
