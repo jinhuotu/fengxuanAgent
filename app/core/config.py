@@ -23,6 +23,8 @@ DEFAULT_LLM_MODEL = "deepseek-flash"
 DEFAULT_LLM_TIMEOUT_SECONDS = 60  # 限制单次请求等待时间，避免一直占用请求线程
 DEFAULT_LLM_MAX_RETRIES = 0  # 初次接入默认不重试，避免失败后重复发起付费请求
 DEFAULT_LLM_MAX_OUTPUT_TOKENS = 2048  # 首版回答长度上限，不是模型的上下文容量
+DEFAULT_KNOWLEDGE_ASR_MODEL = "small"
+DEFAULT_KNOWLEDGE_ASR_CACHE_DIR = ".cache/faster-whisper"
 
 
 class Settings(BaseSettings):
@@ -106,6 +108,8 @@ class Settings(BaseSettings):
     qdrant_api_key: SecretStr = SecretStr("")
     qdrant_collection: str = "fengxuan_chunks"
     qdrant_timeout_seconds: float = Field(default=3, gt=0)
+    knowledge_asr_model: str = Field(default=DEFAULT_KNOWLEDGE_ASR_MODEL, min_length=1)
+    knowledge_asr_cache_dir: str = Field(default=DEFAULT_KNOWLEDGE_ASR_CACHE_DIR, min_length=1)
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     # bge-small-zh-v1.5 输出 512 维；换模型必须同步改这里并重建索引。
     embedding_dim: int = Field(default=512, ge=1)

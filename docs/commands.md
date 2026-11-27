@@ -209,6 +209,20 @@ docker compose --profile verify stop mysql-verify
 冷启动那一条只告警、不判失败，数字出现在输出末尾的 warnings summary 里。本机实测冷启动 3–5 秒、常驻后单次 2–7ms：
 意思是**服务重启后的第一次提问很可能来不及带上资料**，这是已知待处理项，见 [进度文档](progress.md)。
 
+### 知识库 OCR 和视频冒烟
+
+让后端进程的 PATH 能找到 `tesseract`、`ffmpeg` 和 `ffprobe`。Tesseract 需要 `chi_sim` 与 `eng` 语言包。Windows 可从 [Tesseract 发布页](https://github.com/tesseract-ocr/tesseract/releases) 和 [FFmpeg 下载页](https://ffmpeg.org/download.html) 准备系统工具。
+
+转写默认用 CPU 加载本机缓存的 `small` 模型。部署前准备权重。服务可通过环境变量 `KNOWLEDGE_ASR_MODEL` 指定模型名或已解包路径，通过 `KNOWLEDGE_ASR_CACHE_DIR` 指定缓存目录。
+
+```powershell
+# 首次准备模型会下载权重，缓存到项目的忽略目录
+uv run --no-sync --no-env-file python -c "from faster_whisper.utils import download_model; download_model('small', cache_dir='.cache/faster-whisper')"
+
+# 验证真实 OCR、MP4 和 WebM，使用隔离 SQLite
+uv run --no-sync --no-env-file python -m pytest tests/test_smoke_knowledge_media.py -m smoke -q
+```
+
 ## 二之六、提交前自动检查
 
 钩子脚本放在仓库的 `.githooks/` 目录里，随代码一起提交；Git 默认不会去那里找，所以**每个克隆要启用一次**：

@@ -4,8 +4,11 @@ from enum import IntEnum
 DOCUMENT_TITLE_LENGTH = 100
 DOCUMENT_CONTENT_LENGTH = 50000
 DOCUMENT_FILE_MAX_BYTES = 10 * 1024 * 1024
+DOCUMENT_VIDEO_MAX_BYTES = 200 * 1024 * 1024
+DOCUMENT_VIDEO_SIZE_ERROR = "视频文件不能超过 200 MB，请拆分后上传"
 DOCUMENT_MULTIPART_OVERHEAD_BYTES = 64 * 1024
 DOCUMENT_FILE_PARSE_TIMEOUT_SECONDS = 30
+DOCUMENT_VIDEO_PARSE_TIMEOUT_SECONDS = 600
 DOCUMENT_PDF_MAX_PAGES = 200
 DOCUMENT_FILE_EXTENSIONS = frozenset({
     ".txt", ".md", ".pdf", ".docx", ".pptx", ".xlsx", ".png", ".jpg", ".jpeg", ".mp4", ".webm",
@@ -81,13 +84,11 @@ FILE_EXTENSION_KINDS = {
     ".mp4": FileKind.VIDEO,
     ".webm": FileKind.VIDEO,
 }
-# 真正打通解析的通道；图片与视频要等 OCR / ASR 引擎接入后才放进来
-ENABLED_FILE_KINDS = frozenset({FileKind.TEXT, FileKind.PDF, FileKind.DOCX, FileKind.PPTX, FileKind.XLSX})
+ENABLED_FILE_KINDS = frozenset({
+    FileKind.TEXT, FileKind.PDF, FileKind.DOCX, FileKind.PPTX, FileKind.XLSX, FileKind.IMAGE, FileKind.VIDEO,
+})
 # 新手注意：识别得出但解析通道没打通的类型，前端会显示为灰态并带上这里的说明。
-DISABLED_KIND_NOTES = {
-    FileKind.IMAGE: "需要 OCR 引擎，暂未启用",
-    FileKind.VIDEO: "需要语音转写引擎，暂未启用",
-}
+DISABLED_KIND_NOTES: dict[FileKind, str] = {}
 DOCUMENT_FILE_NAME_LENGTH = 200
 DOCUMENT_PPT_MAX_SLIDES = 200
 DOCUMENT_XLSX_MAX_ROWS = 20000

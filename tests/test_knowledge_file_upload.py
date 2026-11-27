@@ -15,6 +15,7 @@ from tests.test_knowledge import DOCUMENT_URL, OTHER_BASE_ID, document_bases, kn
 FILE_URL = f"{DOCUMENT_URL}/file"
 DOCX_TEXT = "段落正文\n\n表格左栏 | 表格右栏\n\n结束段落"
 PDF_TEXT = "Text layer from a PDF"
+SUPPORTED_SUFFIXES = ".docx / .jpeg / .jpg / .md / .mp4 / .pdf / .png / .pptx / .txt / .webm / .xlsx"
 
 
 # 做什么：现场创建有正文、表格、页眉页脚和批注的 Word 夹具
@@ -110,12 +111,14 @@ def test_upload_file_indexes_extracted_text(
 # 返回：无；状态码、业务码、文案或事务边界不符合预期时断言失败
 @pytest.mark.parametrize(("filename", "payload", "status", "code", "message"), [
     ("资料.csv", b"table", 415, 4005,
-     "暂不支持 .csv，当前支持 .docx / .md / .pdf / .pptx / .txt / .xlsx"),
+     f"暂不支持 .csv，当前支持 {SUPPORTED_SUFFIXES}"),
     ("超大.txt", b"a" * (DOCUMENT_FILE_MAX_BYTES + 1), 413, 4006, "文件不能超过 10 MB，请拆分后上传"),
     ("正文超长.md", b"a" * (DOCUMENT_CONTENT_LENGTH + 1), 422, 4008, "文件正文不能超过 50000 字，请拆分后上传"),
     ("空白.txt", b" \n\t", 422, 4008, "文件没有可用正文，请检查内容后上传"),
     ("未知编码.txt", b"\xff", 415, 4005,
-     "无法识别文件内容，可能已损坏；当前支持 .docx / .md / .pdf / .pptx / .txt / .xlsx"),
+     f"无法识别文件内容，可能已损坏；当前支持 {SUPPORTED_SUFFIXES}"),
+    ("改名.png", b"this is plain text", 415, 4005,
+     "扩展名 .png 与文件实际类型（文本）不符，请确认文件是否被改名"),
     ("损坏.docx", b"not a zip file", 415, 4005,
      "扩展名 .docx 与文件实际类型（文本）不符，请确认文件是否被改名"),
     ("扫描.pdf", minimal_pdf(b"q 20 0 0 20 0 0 cm BI /W 1 /H 1 /BPC 8 /CS /G ID \x00 EI Q"),
@@ -172,11 +175,11 @@ def test_file_parsing_timeout_creates_no_rows(
     knowledge_client, knowledge_sessions, owner_headers, document_bases, monkeypatch,
 ) -> None:
     # 做什么：模拟一个耗时超过接口等待上限的同步解析器
-    # 入参：已接收的请求类型和字节
+    # 入参：已校验的文件名和读回的字节
     # 返回：延迟给出本来可入库的正文
-    def slow_parse(content_type: str, payload: bytearray):
+    def slow_parse(upload_name: knowledge_upload.UploadName, payload: bytes):
         sleep(0.1)
-        return real_parse(content_type, payload)
+        return real_parse(upload_name, payload)
 
     real_parse = knowledge_upload.parse_file_upload
     monkeypatch.setattr(knowledge_upload, "parse_file_upload", slow_parse)

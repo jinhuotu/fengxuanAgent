@@ -24,6 +24,8 @@ dependencies = [
     "pypdf>=6,<7",
     "python-pptx>=1.0,<2",
     "openpyxl>=3.1,<4",
+    "pytesseract==0.3.13",
+    "faster-whisper==1.2.1",
 ]
 
 # 开发依赖：只在本机用，不进生产镜像（uv sync --no-dev 就会跳过这组）

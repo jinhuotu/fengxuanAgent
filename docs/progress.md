@@ -258,3 +258,7 @@
 - 日期：2026-11-27。
 - 决定：知识库上传改为"先探测真实类型、再按类型走独立通道"。`knowledge_probe` 按魔数识别 PDF、zip 容器（docx / pptx / xlsx）、OLE 老 Office、图片、视频与纯文本，扩展名只用来对照；扩展名与实际类型不符、含宏、老格式一律拒绝并给出具体原因。`knowledge_channel_*` 各自解析分块：文本整篇、Markdown 按标题、PDF 按页、Word 按 Heading 样式分章且表格转"列名：值"、PPT 一页一块带备注、Excel 每 20 行一块并重复表头。各通道只产出统一的 `ParsedFile(text, drafts)`，写库、向量同步、引用偏移与删除级联仍共用一套。
 - 说明：文档落库与索引自检从 `services/knowledge.py` 拆到 `knowledge_document_store.py`（`persist_document` 支持传入预切块，纯文本路径行为不变），`knowledge.py` 由 484 行降到 305 行。`knowledge_documents` 新增 `source_type / file_type / file_name / file_size` 四列（迁移 `f9c4d2b81e5a`，已在 3307 真实库升到 head），新增 `GET /knowledge-bases/file-types` 供前端渲染类型卡片。图片与视频能识别但通道未启用（本机缺 OCR / ASR 引擎），清单里返回 `enabled=false` 并附原因。新增依赖 `python-pptx`、`openpyxl`（已获用户同意）。新增 `tests/test_knowledge_channels.py` 13 条，全量 435 passed、7 deselected。
+
+- 日期：2026-11-27。
+- 决定：知识库图片走本地 Tesseract，视频走本地 faster-whisper `small`。新增 `pytesseract==0.3.13`、`faster-whisper==1.2.1`，更新 `uv.lock`。先校验归属和文件名，再流式落盘，视频上限 200 MB，后端接收与解析时限 600 秒，前端视频请求时限 600 秒。其他格式按 10 MB、后端 30 秒处理。
+- 说明：OCR 按段落切片，视频按字幕记录时间范围。视频和抽取的音轨处理后清理，两个通道沿用现有入库、向量同步与原文偏移。后端隔离回归 452 项，另有 OCR、MP4 与 WebM 三项独立冒烟。前端对话 95、布局 14、知识库 28 项及生产构建通过。沿用迁移 `f9c4d2b81e5a`。

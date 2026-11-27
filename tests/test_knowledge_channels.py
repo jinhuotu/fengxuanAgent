@@ -164,7 +164,11 @@ def test_file_type_list_matches_capability(knowledge_client, owner_headers) -> N
     for kind in (FileKind.TEXT, FileKind.PDF, FileKind.DOCX, FileKind.PPTX, FileKind.XLSX):
         assert items[int(kind)]["enabled"] is True and items[int(kind)]["extensions"]
     image_item = items[int(FileKind.IMAGE)]
-    assert image_item["enabled"] is False and image_item["note"]
+    assert image_item["enabled"] is True and image_item["note"] is None
+    assert set(image_item["extensions"]) == {".png", ".jpg", ".jpeg"}
+    video_item = items[int(FileKind.VIDEO)]
+    assert video_item["enabled"] is True and video_item["note"] is None
+    assert set(video_item["extensions"]) == {".mp4", ".webm"}
     assert ".docx" in items[int(FileKind.DOCX)]["extensions"]
 
 

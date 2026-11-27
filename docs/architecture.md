@@ -135,9 +135,10 @@ tests/test_chat_partial_save.py 使用 tests/partial_save_worker.py 在专用子
 `GET /knowledge-bases/{knowledge_base_id}/documents` 按文档编号倒序分页，返回公开字段。
 两个接口都复用登录校验，并按知识库编号、归属和软删除标志检查可见性。不可见时统一返回 `404/4001`。
 
-`POST /knowledge-bases/{knowledge_base_id}/documents/file` 接收 `multipart/form-data` 的单个 `file` 字段。先校验本人知识库，再在内存限量接收并解析。文件最多 10 MB，收取和解析共用 30 秒时限，文件名去掉扩展名后按现有标题规则校验。
+`POST /knowledge-bases/{knowledge_base_id}/documents/file` 接收 `multipart/form-data` 的单个 `file` 字段。先校验本人知识库及文件名，再逐块把正文写入临时文件。MP4、WebM 上限为 200 MB，接收和解析共用 600 秒。其他文件上限为 10 MB，接收和解析共用 30 秒。超限立即停止读取。
 TXT、Markdown 先按 UTF-8 解码，失败时尝试 GB18030。DOCX 按正文顺序提取段落和表格文字。PDF 最多 200 页，只提取有文字层的页面，纯扫描件返回提示。
-原件不保留。正文为空或超过 `DOCUMENT_CONTENT_LENGTH` 时整单拒绝。解析成功才复用 JSON 上传的事务、切片、全文及向量索引链路，返回字段一致。
+PNG、JPG 和 JPEG 经 Pillow 解码校验，用 Tesseract 识别后按段落切片。MP4 和 WebM 从临时路径探测和抽取单声道音轨，用本地 faster-whisper `small` 转写，每段字幕生成带时间范围的标题。
+原件与音轨在处理结束后清理。正文为空或超过 `DOCUMENT_CONTENT_LENGTH` 时整单拒绝。解析成功后复用文件文档入库、切片偏移、全文及向量索引链路。
 文件错误统一返回 4xx。`4004` 为文件字段或标题无效，`4005` 为扩展名不支持，`4006` 为文件超限，`4007` 为解析、编码或文字层错误，`4008` 为正文或页数不满足限制，`4009` 为超时。
 
 `POST /knowledge-bases/{knowledge_base_id}/search` 先检查知识库归属，再检索该库内本人未删除的切片。
